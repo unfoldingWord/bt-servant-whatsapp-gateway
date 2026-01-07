@@ -1,4 +1,5 @@
 """Tests for webhook routes."""
+# pylint: disable=redefined-outer-name
 
 import hashlib
 import hmac

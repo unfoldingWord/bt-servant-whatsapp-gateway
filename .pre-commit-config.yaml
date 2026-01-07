@@ -58,6 +58,20 @@ repos:
           - "pydantic>=2.10.0"
           - "pydantic-settings>=2.7.0"
 
+      - id: pylint
+        name: pylint
+        entry: bash -c 'pylint -rn -sn $(git ls-files "*.py")'
+        language: python
+        pass_filenames: false
+        stages: [pre-commit]
+        additional_dependencies:
+          - "pylint>=3.0.0"
+          - "fastapi>=0.115.0"
+          - "httpx>=0.28.0"
+          - "pydantic>=2.10.0"
+          - "pydantic-settings>=2.7.0"
+          - "pytest>=8.0.0"
+
       - id: bandit
         name: bandit (security)
         entry: bandit -q -r whatsapp_gateway

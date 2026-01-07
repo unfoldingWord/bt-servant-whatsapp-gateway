@@ -70,4 +70,4 @@ class TestCombineChunks:
 
     def test_empty_chunks(self) -> None:
         """Empty chunk list should return empty list."""
-        assert combine_chunks([], max_length=1500) == []
+        assert not combine_chunks([], max_length=1500)

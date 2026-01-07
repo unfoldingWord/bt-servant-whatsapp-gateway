@@ -71,11 +71,21 @@ class TestIncomingMessage:
         current_time = int(time.time())
         text_data = {
             "user_id": "123",
-            "message": {"id": "1", "type": "text", "timestamp": str(current_time), "text": {"body": "hi"}},
+            "message": {
+                "id": "1",
+                "type": "text",
+                "timestamp": str(current_time),
+                "text": {"body": "hi"},
+            },
         }
         audio_data = {
             "user_id": "123",
-            "message": {"id": "2", "type": "audio", "timestamp": str(current_time), "audio": {"id": "m1"}},
+            "message": {
+                "id": "2",
+                "type": "audio",
+                "timestamp": str(current_time),
+                "audio": {"id": "m1"},
+            },
         }
         image_data = {
             "user_id": "123",
@@ -93,15 +103,27 @@ class TestIncomingMessage:
 
         old_data = {
             "user_id": "123",
-            "message": {"id": "1", "type": "text", "timestamp": str(old_time), "text": {"body": "hi"}},
+            "message": {
+                "id": "1",
+                "type": "text",
+                "timestamp": str(old_time),
+                "text": {"body": "hi"},
+            },
         }
         recent_data = {
             "user_id": "123",
-            "message": {"id": "2", "type": "text", "timestamp": str(recent_time), "text": {"body": "hi"}},
+            "message": {
+                "id": "2",
+                "type": "text",
+                "timestamp": str(recent_time),
+                "text": {"body": "hi"},
+            },
         }
 
-        assert IncomingMessage.from_webhook_data(old_data, message_age_cutoff=3600).too_old() is True
-        assert IncomingMessage.from_webhook_data(recent_data, message_age_cutoff=3600).too_old() is False
+        old_msg = IncomingMessage.from_webhook_data(old_data, message_age_cutoff=3600)
+        assert old_msg.too_old() is True
+        recent_msg = IncomingMessage.from_webhook_data(recent_data, message_age_cutoff=3600)
+        assert recent_msg.too_old() is False
 
     def test_interactive_button_reply(self) -> None:
         """Interactive button reply should parse correctly."""

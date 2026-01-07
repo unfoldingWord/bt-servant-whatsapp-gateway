@@ -1,0 +1,65 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-lint
+        name: ruff (lint)
+        entry: ruff check .
+        language: system
+        pass_filenames: false
+        stages: [commit]
+
+      - id: ruff-format
+        name: ruff (format)
+        entry: ruff format --check whatsapp_gateway
+        language: system
+        pass_filenames: false
+        stages: [commit]
+
+      - id: mypy
+        name: mypy (types)
+        entry: mypy .
+        language: system
+        pass_filenames: false
+        stages: [commit]
+
+      - id: pyright
+        name: pyright (types)
+        entry: pyright
+        language: system
+        pass_filenames: false
+        stages: [commit]
+
+      - id: import-linter
+        name: import-linter (onion architecture)
+        entry: lint-imports
+        language: system
+        pass_filenames: false
+        stages: [commit]
+
+      - id: bandit
+        name: bandit (security)
+        entry: bandit -q -r whatsapp_gateway
+        language: system
+        pass_filenames: false
+        stages: [push]
+
+      - id: pip-audit
+        name: pip-audit (supply chain)
+        entry: pip-audit
+        language: system
+        pass_filenames: false
+        stages: [push]
+
+      - id: deptry
+        name: deptry (dependency hygiene)
+        entry: deptry .
+        language: system
+        pass_filenames: false
+        stages: [push]
+
+      - id: pytest
+        name: pytest (with coverage threshold)
+        entry: pytest --cov=whatsapp_gateway --cov-fail-under=65
+        language: system
+        pass_filenames: false
+        stages: [push]

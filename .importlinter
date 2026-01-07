@@ -1,0 +1,27 @@
+[importlinter]
+root_package = whatsapp_gateway
+
+[importlinter:layering]
+name = Onion layering (strict)
+type = layers
+layers =
+    whatsapp_gateway.routes
+    whatsapp_gateway.services
+    whatsapp_gateway.meta_api
+    whatsapp_gateway.core
+
+[importlinter:no_routes_to_meta_client]
+name = Routes must not import meta_api.client directly (use services)
+type = forbidden
+source_modules =
+    whatsapp_gateway.routes
+forbidden_modules =
+    whatsapp_gateway.meta_api.client
+
+[importlinter:no_services_to_routes]
+name = Services must not import routes
+type = forbidden
+source_modules =
+    whatsapp_gateway.services
+forbidden_modules =
+    whatsapp_gateway.routes

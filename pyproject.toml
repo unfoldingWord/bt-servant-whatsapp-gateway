@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whatsapp-gateway"
+version = "0.1.0"
+description = "WhatsApp gateway for bt-servant-engine"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "httpx>=0.28.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=6.0.0",
+    "pytest-asyncio>=1.0.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "pyright>=1.1.390",
+    "pylint>=3.3.0",
+    "import-linter>=2.1",
+    "bandit>=1.8.0",
+    "pip-audit>=2.8.0",
+    "deptry>=0.21.0",
+    "pre-commit>=4.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["whatsapp_gateway*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "D", "UP", "ANN", "S", "B", "A", "C4", "DTZ", "T10", "ICN", "PIE", "PT", "RSE", "RET", "SIM", "TID", "ARG", "PL", "TRY", "RUF"]
+ignore = ["D100", "D104", "D107", "ANN401", "PLR0913", "TRY003", "D212"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "ANN201", "D103", "PLR2004", "E501", "PLC0415"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["whatsapp_gateway"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 65
+show_missing = true

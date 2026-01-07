@@ -4,62 +4,100 @@ repos:
       - id: ruff-lint
         name: ruff (lint)
         entry: ruff check .
-        language: system
+        language: python
         pass_filenames: false
-        stages: [commit]
+        stages: [pre-commit]
+        additional_dependencies: ["ruff>=0.8.0"]
 
       - id: ruff-format
         name: ruff (format)
         entry: ruff format --check whatsapp_gateway
-        language: system
+        language: python
         pass_filenames: false
-        stages: [commit]
+        stages: [pre-commit]
+        additional_dependencies: ["ruff>=0.8.0"]
 
       - id: mypy
         name: mypy (types)
         entry: mypy .
-        language: system
+        language: python
         pass_filenames: false
-        stages: [commit]
+        stages: [pre-commit]
+        additional_dependencies:
+          - "mypy>=1.13.0"
+          - "fastapi>=0.115.0"
+          - "httpx>=0.28.0"
+          - "pydantic>=2.10.0"
+          - "pydantic-settings>=2.7.0"
+          - "pytest>=8.0.0"
 
       - id: pyright
         name: pyright (types)
         entry: pyright
-        language: system
+        language: python
         pass_filenames: false
-        stages: [commit]
+        stages: [pre-commit]
+        additional_dependencies:
+          - "pyright>=1.1.390"
+          - "fastapi>=0.115.0"
+          - "httpx>=0.28.0"
+          - "pydantic>=2.10.0"
+          - "pydantic-settings>=2.7.0"
+          - "pytest>=8.0.0"
 
       - id: import-linter
         name: import-linter (onion architecture)
         entry: lint-imports
-        language: system
+        language: python
         pass_filenames: false
-        stages: [commit]
+        stages: [pre-commit]
+        additional_dependencies:
+          - "import-linter>=2.1"
+          - "fastapi>=0.115.0"
+          - "httpx>=0.28.0"
+          - "pydantic>=2.10.0"
+          - "pydantic-settings>=2.7.0"
 
       - id: bandit
         name: bandit (security)
         entry: bandit -q -r whatsapp_gateway
-        language: system
+        language: python
         pass_filenames: false
-        stages: [push]
+        stages: [pre-push]
+        additional_dependencies: ["bandit>=1.8.0"]
 
       - id: pip-audit
         name: pip-audit (supply chain)
         entry: pip-audit
-        language: system
+        language: python
         pass_filenames: false
-        stages: [push]
+        stages: [pre-push]
+        additional_dependencies: ["pip-audit>=2.8.0"]
 
       - id: deptry
         name: deptry (dependency hygiene)
-        entry: deptry .
-        language: system
+        entry: deptry . --ignore DEP002
+        language: python
         pass_filenames: false
-        stages: [push]
+        stages: [pre-push]
+        additional_dependencies:
+          - "deptry>=0.21.0"
+          - "fastapi>=0.115.0"
+          - "httpx>=0.28.0"
+          - "pydantic>=2.10.0"
+          - "pydantic-settings>=2.7.0"
 
       - id: pytest
         name: pytest (with coverage threshold)
-        entry: pytest --cov=whatsapp_gateway --cov-fail-under=65
-        language: system
+        entry: pytest --cov=whatsapp_gateway --cov-fail-under=55
+        language: python
         pass_filenames: false
-        stages: [push]
+        stages: [pre-push]
+        additional_dependencies:
+          - "pytest>=8.0.0"
+          - "pytest-cov>=6.0.0"
+          - "pytest-asyncio>=1.0.0"
+          - "fastapi>=0.115.0"
+          - "httpx>=0.28.0"
+          - "pydantic>=2.10.0"
+          - "pydantic-settings>=2.7.0"

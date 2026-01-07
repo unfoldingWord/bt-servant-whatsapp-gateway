@@ -1,5 +1,29 @@
 # Claude Instructions - bt-servant-whatsapp-gateway
 
+## System Context
+
+**BT Servant** is an AI-powered Bible translation assistant developed by unfoldingWord. The system helps Bible translators by providing AI-assisted drafting, checking, and guidance in multiple languages.
+
+The system consists of two main components:
+
+1. **bt-servant-engine** (`../bt-servant-engine`) - The core AI engine that handles:
+   - Language model interactions (OpenAI, Claude, etc.)
+   - Audio transcription (speech-to-text)
+   - Text-to-speech generation
+   - User preferences and session management
+   - Intent processing and agentic workflows
+   - All the "brains" of the system
+
+2. **bt-servant-whatsapp-gateway** (this repo) - A thin relay/bridge that:
+   - Receives WhatsApp messages from Meta's Cloud API
+   - Forwards them to the engine for processing
+   - Sends responses back through WhatsApp
+
+The gateway is intentionally "dumb" - it does NO AI processing itself. This separation allows:
+- The engine to serve multiple channels (web, WhatsApp, future platforms)
+- Each gateway to focus purely on protocol translation
+- Clear security boundaries (gateway handles Meta auth, engine handles AI)
+
 ## Project Overview
 
 WhatsApp Gateway is a service that handles Meta/WhatsApp webhook integration for the BT Servant Engine. It:
@@ -84,7 +108,21 @@ pre-commit install
 pre-commit install --hook-type pre-push
 ```
 
-**Never bypass hooks** - they enforce code quality and architecture.
+### CRITICAL: Pre-commit is Mandatory
+
+**NEVER commit code unless ALL pre-commit checks pass.** This is non-negotiable.
+
+Before ANY commit, you MUST run:
+```bash
+python -m pre_commit run --all-files
+```
+
+If any check fails:
+1. Fix the issue
+2. Re-run until all checks pass
+3. Only then commit
+
+**NEVER use `--no-verify` or any flag to bypass hooks.** If a check is failing, the code is not ready to commit. Period.
 
 ## Environment Variables
 

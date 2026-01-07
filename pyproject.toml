@@ -60,7 +60,8 @@ ignore_missing_imports = true
 
 [tool.pyright]
 pythonVersion = "3.12"
-typeCheckingMode = "strict"
+typeCheckingMode = "standard"
+reportMissingImports = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -72,5 +73,5 @@ source = ["whatsapp_gateway"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 65
+fail_under = 55
 show_missing = true

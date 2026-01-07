@@ -33,7 +33,7 @@ def chunk_message(text: str, max_length: int | None = None) -> list[str]:
     chunks = _split_at_sentences(text, max_length)
 
     # Ensure no chunk exceeds the limit
-    final_chunks = []
+    final_chunks: list[str] = []
     for chunk in chunks:
         if len(chunk) <= max_length:
             final_chunks.append(chunk)
@@ -51,10 +51,10 @@ def _split_at_sentences(text: str, max_length: int) -> list[str]:
     pieces = re.split(r"(\.|;|\n\n)", text)
 
     # Reattach separators to their preceding text
-    combined_pieces = []
+    combined_pieces: list[str] = []
     i = 0
     while i < len(pieces):
-        piece = pieces[i]
+        piece: str = pieces[i]
         if i + 1 < len(pieces) and pieces[i + 1] in {".", ";", "\n\n"}:
             piece += pieces[i + 1]
             i += 2
@@ -64,8 +64,8 @@ def _split_at_sentences(text: str, max_length: int) -> list[str]:
             combined_pieces.append(piece.strip())
 
     # Combine pieces into chunks respecting max_length
-    chunks = []
-    current_chunk = ""
+    chunks: list[str] = []
+    current_chunk: str = ""
     for piece in combined_pieces:
         separator = " " if current_chunk else ""
         if len(current_chunk) + len(separator) + len(piece) <= max_length:
@@ -83,8 +83,8 @@ def _split_at_sentences(text: str, max_length: int) -> list[str]:
 
 def _force_split(text: str, max_length: int) -> list[str]:
     """Force split text that exceeds max_length, trying word boundaries."""
-    chunks = []
-    remaining = text
+    chunks: list[str] = []
+    remaining: str = text
 
     while len(remaining) > max_length:
         # Try to split at last space before max_length
@@ -118,8 +118,8 @@ def combine_chunks(chunks: list[str], max_length: int | None = None) -> list[str
     if max_length is None:
         max_length = config.CHUNK_SIZE
 
-    combined = []
-    current = ""
+    combined: list[str] = []
+    current: str = ""
 
     for chunk in chunks:
         separator = "\n\n" if current else ""

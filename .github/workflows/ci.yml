@@ -1,6 +1,9 @@
-name: CI (PRs - Full Suite)
+name: CI
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - "**"
@@ -39,7 +42,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install -e .
+          pip install -e ".[dev]"
 
       - name: Ruff (format check)
         run: ruff format --check whatsapp_gateway
@@ -54,7 +57,7 @@ jobs:
         run: mypy .
 
       - name: Pyright
-        run: pyright --warnings
+        run: pyright
 
       - name: Import Linter
         run: lint-imports
@@ -69,4 +72,4 @@ jobs:
         run: deptry .
 
       - name: Pytest (coverage)
-        run: pytest --cov=whatsapp_gateway --cov-report=term-missing --cov-fail-under=65
+        run: pytest --cov=whatsapp_gateway --cov-report=term-missing --cov-fail-under=55

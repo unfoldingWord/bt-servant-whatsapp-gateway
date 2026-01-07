@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import logging
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal, cast
 
 import httpx
 
@@ -34,14 +34,14 @@ class ChatResponse:
     has_queued_intents: bool
 
     @classmethod
-    def from_dict(cls, data: dict) -> ChatResponse:
+    def from_dict(cls, data: dict[str, Any]) -> ChatResponse:
         """Create ChatResponse from API response dict."""
         return cls(
-            responses=data.get("responses", []),
-            response_language=data.get("response_language", "en"),
-            voice_audio_base64=data.get("voice_audio_base64"),
-            intent_processed=data.get("intent_processed", ""),
-            has_queued_intents=data.get("has_queued_intents", False),
+            responses=cast(list[str], data.get("responses", [])),
+            response_language=cast(str, data.get("response_language", "en")),
+            voice_audio_base64=cast(str | None, data.get("voice_audio_base64")),
+            intent_processed=cast(str, data.get("intent_processed", "")),
+            has_queued_intents=cast(bool, data.get("has_queued_intents", False)),
         )
 
 
@@ -54,12 +54,14 @@ class UserPreferences:
     dev_agentic_mcp: bool | None = None
 
     @classmethod
-    def from_dict(cls, data: dict) -> UserPreferences:
+    def from_dict(cls, data: dict[str, Any]) -> UserPreferences:
         """Create UserPreferences from API response dict."""
         return cls(
-            response_language=data.get("response_language"),
-            agentic_strength=data.get("agentic_strength"),
-            dev_agentic_mcp=data.get("dev_agentic_mcp"),
+            response_language=cast(str | None, data.get("response_language")),
+            agentic_strength=cast(
+                Literal["normal", "low", "very_low"] | None, data.get("agentic_strength")
+            ),
+            dev_agentic_mcp=cast(bool | None, data.get("dev_agentic_mcp")),
         )
 
 
@@ -164,9 +166,7 @@ async def get_user_preferences(user_id: str) -> UserPreferences | None:
             if e.response.status_code == HTTP_NOT_FOUND:
                 # User not found, return defaults
                 return UserPreferences()
-            logger.exception(
-                "Engine API error: %s - %s", e.response.status_code, e.response.text
-            )
+            logger.exception("Engine API error: %s - %s", e.response.status_code, e.response.text)
             return None
         except httpx.RequestError:
             logger.exception("Engine connection error")
@@ -187,7 +187,7 @@ async def update_user_preferences(
         Updated UserPreferences if successful, None otherwise
     """
     url = f"{config.ENGINE_BASE_URL}/api/v1/users/{user_id}/preferences"
-    payload = {}
+    payload: dict[str, str | bool] = {}
     if preferences.response_language is not None:
         payload["response_language"] = preferences.response_language
     if preferences.agentic_strength is not None:
@@ -201,9 +201,7 @@ async def update_user_preferences(
             response.raise_for_status()
             return UserPreferences.from_dict(response.json())
         except httpx.HTTPStatusError as e:
-            logger.exception(
-                "Engine API error: %s - %s", e.response.status_code, e.response.text
-            )
+            logger.exception("Engine API error: %s - %s", e.response.status_code, e.response.text)
             return None
         except httpx.RequestError:
             logger.exception("Engine connection error")

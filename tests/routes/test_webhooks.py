@@ -6,6 +6,7 @@ import hmac
 import pytest
 from fastapi.testclient import TestClient
 
+from whatsapp_gateway.config import config
 from whatsapp_gateway.main import create_app
 
 
@@ -21,9 +22,6 @@ class TestVerifyWebhook:
 
     def test_verify_success(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         """Successful verification returns challenge."""
-        monkeypatch.setenv("META_VERIFY_TOKEN", "my_verify_token")
-        # Re-import config to pick up new env var
-        from whatsapp_gateway import config
         monkeypatch.setattr(config, "META_VERIFY_TOKEN", "my_verify_token")
 
         response = client.get(
@@ -39,7 +37,6 @@ class TestVerifyWebhook:
 
     def test_verify_wrong_token(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         """Wrong token returns 403."""
-        from whatsapp_gateway import config
         monkeypatch.setattr(config, "META_VERIFY_TOKEN", "correct_token")
 
         response = client.get(
@@ -54,7 +51,6 @@ class TestVerifyWebhook:
 
     def test_verify_wrong_mode(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         """Wrong mode returns 403."""
-        from whatsapp_gateway import config
         monkeypatch.setattr(config, "META_VERIFY_TOKEN", "my_token")
 
         response = client.get(
@@ -73,7 +69,6 @@ class TestHandleWebhook:
 
     def test_invalid_signature(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         """Invalid signature returns 401."""
-        from whatsapp_gateway import config
         monkeypatch.setattr(config, "META_APP_SECRET", "secret")
         monkeypatch.setattr(config, "FACEBOOK_USER_AGENT", "facebookexternalua")
 
@@ -89,7 +84,6 @@ class TestHandleWebhook:
 
     def test_invalid_user_agent(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         """Invalid user agent returns 401."""
-        from whatsapp_gateway import config
         monkeypatch.setattr(config, "META_APP_SECRET", "secret")
         monkeypatch.setattr(config, "FACEBOOK_USER_AGENT", "facebookexternalua")
 
@@ -113,7 +107,6 @@ class TestHandleWebhook:
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Valid request with empty payload returns 200."""
-        from whatsapp_gateway import config
         monkeypatch.setattr(config, "META_APP_SECRET", "secret")
         monkeypatch.setattr(config, "FACEBOOK_USER_AGENT", "facebookexternalua")
 

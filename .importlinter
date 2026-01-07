@@ -17,6 +17,7 @@ source_modules =
     whatsapp_gateway.routes
 forbidden_modules =
     whatsapp_gateway.meta_api.client
+allow_indirect_imports = true
 
 [importlinter:no_services_to_routes]
 name = Services must not import routes

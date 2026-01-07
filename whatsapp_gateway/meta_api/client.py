@@ -182,7 +182,7 @@ async def download_media(media_id: str) -> bytes | None:
             logger.error("Failed to download media: %s", media_response.text)
             return None
 
-        return media_response.content
+        return bytes(media_response.content)
 
 
 async def _upload_media(file_path: str, content_type: str) -> str | None:
@@ -215,7 +215,8 @@ async def _upload_media(file_path: str, content_type: str) -> str | None:
         return None
 
     media = response.json()
-    media_id = media.get("id") if isinstance(media, Mapping) else None
+    raw_id = media.get("id") if isinstance(media, Mapping) else None
+    media_id: str | None = str(raw_id) if raw_id else None
     if not media_id:
         logger.error("Upload succeeded but response contained no media ID")
         return None

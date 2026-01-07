@@ -1,6 +1,20 @@
 """Pytest configuration and fixtures."""
 
+import os
+
 import pytest
+
+
+def pytest_configure() -> None:
+    """Set environment variables before test collection."""
+    os.environ.setdefault("META_VERIFY_TOKEN", "test_verify_token")
+    os.environ.setdefault("META_WHATSAPP_TOKEN", "test_whatsapp_token")
+    os.environ.setdefault("META_PHONE_NUMBER_ID", "123456789")
+    os.environ.setdefault("META_APP_SECRET", "test_app_secret")
+    os.environ.setdefault("FACEBOOK_USER_AGENT", "facebookexternalua")
+    os.environ.setdefault("ENGINE_BASE_URL", "http://localhost:8000")
+    os.environ.setdefault("ENGINE_API_KEY", "test_api_key")
+    os.environ.setdefault("LOG_PSEUDONYM_SECRET", "test_secret")
 
 
 @pytest.fixture(autouse=True)

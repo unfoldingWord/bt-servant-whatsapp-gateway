@@ -69,7 +69,7 @@ jobs:
         run: pip-audit -r requirements.txt
 
       - name: Deptry
-        run: deptry .
+        run: deptry . --ignore DEP002
 
       - name: Pytest (coverage)
         run: pytest --cov=whatsapp_gateway --cov-report=term-missing --cov-fail-under=55

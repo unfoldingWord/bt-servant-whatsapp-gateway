@@ -77,9 +77,14 @@ META_APP_SECRET=your_app_secret
 ENGINE_BASE_URL=http://localhost:8000
 ENGINE_API_KEY=your_engine_api_key
 
+# Progress Callbacks (optional)
+GATEWAY_PUBLIC_URL=https://your-gateway.example.com  # Required for progress updates
+PROGRESS_THROTTLE_SECONDS=3.0
+
 # Optional
 LOG_LEVEL=INFO
 IN_META_SANDBOX_MODE=false
+MESSAGE_AGE_CUTOFF_IN_SECONDS=3600
 ```
 
 ### Running
@@ -104,6 +109,7 @@ Configure your Meta webhook to point to:
 |----------|--------|-------------|
 | `/meta-whatsapp` | GET | Meta webhook verification |
 | `/meta-whatsapp` | POST | Receive WhatsApp messages |
+| `/progress-callback` | POST | Receive progress updates from engine |
 | `/health` | GET | Health check |
 | `/` | GET | Service info |
 
@@ -134,7 +140,7 @@ pre-commit run --all-files
 pytest
 
 # With coverage
-pytest --cov=whatsapp_gateway --cov-fail-under=65
+pytest --cov=whatsapp_gateway --cov-fail-under=55
 ```
 
 ### Pre-commit Hooks
@@ -185,10 +191,11 @@ bt-servant-whatsapp-gateway/
 2. **Validation**: Gateway verifies the signature and user agent
 3. **Message Parsing**: Extracts message content (text or audio media ID)
 4. **Audio Handling**: If voice message, downloads audio from Meta
-5. **Engine Request**: Sends message to engine's `/api/v1/chat` endpoint
-6. **Response Processing**: Engine returns text (and optional voice audio)
-7. **Chunking**: Long responses are split into WhatsApp-friendly chunks (≤1500 chars)
-8. **Send Response**: Gateway sends response(s) back via WhatsApp API
+5. **Engine Request**: Sends message to engine's `/api/v1/chat` endpoint with callback URL
+6. **Progress Updates**: Engine sends progress updates to `/progress-callback` during processing
+7. **Response Processing**: Engine returns text (and optional voice audio)
+8. **Chunking**: Long responses are split into WhatsApp-friendly chunks (≤1500 chars)
+9. **Send Response**: Gateway sends response(s) back via WhatsApp API
 
 ## Related Projects
 

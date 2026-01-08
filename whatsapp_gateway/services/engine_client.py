@@ -73,24 +73,36 @@ def _get_auth_headers() -> dict[str, str]:
     }
 
 
-async def send_text_message(user_id: str, message: str) -> ChatResponse | None:
+async def send_text_message(
+    user_id: str,
+    message: str,
+    progress_callback_url: str | None = None,
+    progress_throttle_seconds: float = 3.0,
+) -> ChatResponse | None:
     """
     Send a text message to the engine for processing.
 
     Args:
         user_id: The user's identifier
         message: The text message content
+        progress_callback_url: URL for engine to POST progress updates (optional)
+        progress_throttle_seconds: Min seconds between progress messages
 
     Returns:
         ChatResponse if successful, None otherwise
     """
     url = f"{config.ENGINE_BASE_URL}/api/v1/chat"
-    payload = {
+    payload: dict[str, Any] = {
         "client_id": CLIENT_ID,
         "user_id": user_id,
         "message": message,
         "message_type": "text",
     }
+
+    # Add progress callback if provided
+    if progress_callback_url:
+        payload["progress_callback_url"] = progress_callback_url
+        payload["progress_throttle_seconds"] = progress_throttle_seconds
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         try:
@@ -106,7 +118,11 @@ async def send_text_message(user_id: str, message: str) -> ChatResponse | None:
 
 
 async def send_audio_message(
-    user_id: str, audio_bytes: bytes, audio_format: str = "ogg"
+    user_id: str,
+    audio_bytes: bytes,
+    audio_format: str = "ogg",
+    progress_callback_url: str | None = None,
+    progress_throttle_seconds: float = 3.0,
 ) -> ChatResponse | None:
     """
     Send an audio message to the engine for processing.
@@ -117,13 +133,15 @@ async def send_audio_message(
         user_id: The user's identifier
         audio_bytes: Raw audio data
         audio_format: Audio format (default: ogg for WhatsApp)
+        progress_callback_url: URL for engine to POST progress updates (optional)
+        progress_throttle_seconds: Min seconds between progress messages
 
     Returns:
         ChatResponse if successful, None otherwise
     """
     url = f"{config.ENGINE_BASE_URL}/api/v1/chat"
     audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
-    payload = {
+    payload: dict[str, Any] = {
         "client_id": CLIENT_ID,
         "user_id": user_id,
         "message": "",
@@ -131,6 +149,11 @@ async def send_audio_message(
         "audio_base64": audio_base64,
         "audio_format": audio_format,
     }
+
+    # Add progress callback if provided
+    if progress_callback_url:
+        payload["progress_callback_url"] = progress_callback_url
+        payload["progress_throttle_seconds"] = progress_throttle_seconds
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         try:

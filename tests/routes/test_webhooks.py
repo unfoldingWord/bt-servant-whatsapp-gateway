@@ -128,6 +128,63 @@ class TestHandleWebhook:
         assert response.status_code == 200
 
 
+class TestProgressCallback:
+    """Tests for progress callback endpoint."""
+
+    def test_valid_callback_with_token(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Valid callback with correct token returns 200."""
+        monkeypatch.setattr(config, "ENGINE_API_KEY", "test_api_key")
+
+        response = client.post(
+            "/progress-callback",
+            json={
+                "user_id": "1234567890",
+                "message_key": "processing",
+                "text": "Processing your request...",
+                "timestamp": 1234567890.0,
+            },
+            headers={"X-Engine-Token": "test_api_key"},
+        )
+        assert response.status_code == 200
+
+    def test_invalid_token_returns_401(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Invalid token returns 401."""
+        monkeypatch.setattr(config, "ENGINE_API_KEY", "correct_key")
+
+        response = client.post(
+            "/progress-callback",
+            json={
+                "user_id": "1234567890",
+                "message_key": "processing",
+                "text": "Processing...",
+                "timestamp": 1234567890.0,
+            },
+            headers={"X-Engine-Token": "wrong_key"},
+        )
+        assert response.status_code == 401
+
+    def test_missing_token_returns_401(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing token when configured returns 401."""
+        monkeypatch.setattr(config, "ENGINE_API_KEY", "required_key")
+
+        response = client.post(
+            "/progress-callback",
+            json={
+                "user_id": "1234567890",
+                "message_key": "processing",
+                "text": "Processing...",
+                "timestamp": 1234567890.0,
+            },
+        )
+        assert response.status_code == 401
+
+
 class TestHealthEndpoints:
     """Tests for health check endpoints."""
 

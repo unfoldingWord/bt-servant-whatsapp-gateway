@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     ENGINE_BASE_URL: str  # e.g., "http://engine:8000"
     ENGINE_API_KEY: str  # ADMIN_API_TOKEN from engine
 
+    # Progress messaging
+    GATEWAY_PUBLIC_URL: str = ""  # e.g., "https://gateway.example.com" (required for progress)
+    PROGRESS_THROTTLE_SECONDS: float = 3.0  # Min seconds between progress messages
+
     # WhatsApp limits
     MAX_MESSAGE_LENGTH: int = 4096
     CHUNK_SIZE: int = 1500

@@ -7,16 +7,24 @@ import logging
 from collections.abc import Iterator
 from typing import Annotated, Any
 
+import httpx
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from whatsapp_gateway.config import config
 from whatsapp_gateway.core.models import IncomingMessage
 from whatsapp_gateway.meta_api.signature import verify_facebook_signature
-from whatsapp_gateway.services.message_handler import handle_incoming_message
+from whatsapp_gateway.services.message_handler import (
+    handle_incoming_message,
+    send_progress_message,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Truncation length for user IDs in log messages (privacy)
+_LOG_USER_ID_TRUNCATE_LEN = 8
 
 
 @router.get("/meta-whatsapp")
@@ -152,3 +160,50 @@ async def _handle_message(message_data: dict[str, Any]) -> None:
 
     # Process the message
     await handle_incoming_message(message)
+
+
+class ProgressCallback(BaseModel):
+    """Payload received from engine progress callbacks."""
+
+    user_id: str
+    message_key: str
+    text: str
+    timestamp: float
+
+
+@router.post("/progress-callback")
+async def receive_progress_callback(
+    progress: ProgressCallback,
+    x_engine_token: Annotated[str | None, Header(alias="X-Engine-Token")] = None,
+) -> Response:
+    """
+    Receive progress updates from the engine during message processing.
+
+    The engine POSTs here when a user's request is being processed and
+    a status update is available. The progress text is forwarded to the
+    user via WhatsApp.
+    """
+    # Verify the callback is from our engine using the shared API key
+    if config.ENGINE_API_KEY and x_engine_token != config.ENGINE_API_KEY:
+        logger.warning("Invalid engine callback token")
+        return Response(status_code=401)
+
+    truncated_user_id = (
+        progress.user_id[:_LOG_USER_ID_TRUNCATE_LEN] + "..."
+        if len(progress.user_id) > _LOG_USER_ID_TRUNCATE_LEN
+        else progress.user_id
+    )
+    logger.info(
+        "Progress callback received for user=%s: %s",
+        truncated_user_id,
+        progress.message_key,
+    )
+
+    # Send progress message to WhatsApp
+    try:
+        await send_progress_message(progress.user_id, progress.text)
+    except httpx.RequestError:
+        logger.exception("Failed to send progress message to WhatsApp")
+        # Don't fail the callback - engine should continue processing
+
+    return Response(status_code=200)

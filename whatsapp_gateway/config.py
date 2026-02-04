@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # Engine connection
     ENGINE_BASE_URL: str  # e.g., "http://engine:8000"
     ENGINE_API_KEY: str  # ADMIN_API_TOKEN from engine
+    ENGINE_ORG: str = "unfoldingWord"  # Organization for user scoping
 
     # Progress messaging
     GATEWAY_PUBLIC_URL: str = ""  # e.g., "https://gateway.example.com" (required for progress)

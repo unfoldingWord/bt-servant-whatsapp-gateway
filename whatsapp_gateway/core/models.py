@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class MessageType(str, Enum):
+class MessageType(StrEnum):
     """Supported WhatsApp message types."""
 
     TEXT = "text"

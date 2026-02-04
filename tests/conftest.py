@@ -14,6 +14,7 @@ def pytest_configure() -> None:
     os.environ.setdefault("FACEBOOK_USER_AGENT", "facebookexternalua")
     os.environ.setdefault("ENGINE_BASE_URL", "http://localhost:8000")
     os.environ.setdefault("ENGINE_API_KEY", "test_api_key")
+    os.environ.setdefault("ENGINE_ORG", "test_org")
     os.environ.setdefault("LOG_PSEUDONYM_SECRET", "test_secret")
 
 
@@ -27,4 +28,5 @@ def set_test_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FACEBOOK_USER_AGENT", "facebookexternalua")
     monkeypatch.setenv("ENGINE_BASE_URL", "http://localhost:8000")
     monkeypatch.setenv("ENGINE_API_KEY", "test_api_key")
+    monkeypatch.setenv("ENGINE_ORG", "test_org")
     monkeypatch.setenv("LOG_PSEUDONYM_SECRET", "test_secret")

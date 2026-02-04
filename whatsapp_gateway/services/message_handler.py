@@ -25,7 +25,7 @@ async def handle_incoming_message(message: IncomingMessage) -> None:
     Handle an incoming WhatsApp message.
 
     1. Send typing indicator
-    2. Get message content (download audio if voice message)
+    2. Reject voice messages (temporarily unsupported)
     3. Call engine API
     4. Send response(s) back to user
 
@@ -35,11 +35,16 @@ async def handle_incoming_message(message: IncomingMessage) -> None:
     # Send typing indicator
     await meta_client.send_typing_indicator(message.message_id)
 
-    # Get engine response based on message type
+    # Reject voice messages (worker doesn't support STT)
     if message.message_type == MessageType.AUDIO:
-        response = await _handle_audio_message(message)
-    else:
-        response = await _handle_text_message(message)
+        await meta_client.send_text_message(
+            message.user_id,
+            "Voice messages are temporarily unavailable. Please send a text message.",
+        )
+        return
+
+    # Get engine response for text messages
+    response = await _handle_text_message(message)
 
     if response is None:
         logger.error("Failed to get response from engine")

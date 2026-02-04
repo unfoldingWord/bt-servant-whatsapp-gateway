@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import httpx
 
@@ -21,6 +22,12 @@ DEFAULT_TIMEOUT = 120.0  # 2 minutes for AI processing
 
 # HTTP status codes
 HTTP_NOT_FOUND = 404
+HTTP_TOO_MANY_REQUESTS = 429
+
+# Retry settings for 429 responses
+MAX_RETRIES = 5
+BASE_DELAY_SECONDS = 2.0
+RETRY_MULTIPLIER = 1.5
 
 
 @dataclass
@@ -30,8 +37,6 @@ class ChatResponse:
     responses: list[str]
     response_language: str
     voice_audio_base64: str | None
-    intent_processed: str
-    has_queued_intents: bool
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ChatResponse:
@@ -40,8 +45,6 @@ class ChatResponse:
             responses=cast(list[str], data.get("responses", [])),
             response_language=cast(str, data.get("response_language", "en")),
             voice_audio_base64=cast(str | None, data.get("voice_audio_base64")),
-            intent_processed=cast(str, data.get("intent_processed", "")),
-            has_queued_intents=cast(bool, data.get("has_queued_intents", False)),
         )
 
 
@@ -50,18 +53,12 @@ class UserPreferences:
     """User preferences from the engine."""
 
     response_language: str | None = None
-    agentic_strength: Literal["normal", "low", "very_low"] | None = None
-    dev_agentic_mcp: bool | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> UserPreferences:
         """Create UserPreferences from API response dict."""
         return cls(
             response_language=cast(str | None, data.get("response_language")),
-            agentic_strength=cast(
-                Literal["normal", "low", "very_low"] | None, data.get("agentic_strength")
-            ),
-            dev_agentic_mcp=cast(bool | None, data.get("dev_agentic_mcp")),
         )
 
 
@@ -71,6 +68,53 @@ def _get_auth_headers() -> dict[str, str]:
         "Authorization": f"Bearer {config.ENGINE_API_KEY}",
         "Content-Type": "application/json",
     }
+
+
+async def _request_with_retry(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    **kwargs: Any,
+) -> httpx.Response:
+    """
+    Make HTTP request with retry on 429 (Too Many Requests).
+
+    The worker returns 429 when a user's request is already being processed.
+    This function retries with exponential backoff.
+
+    Args:
+        client: The HTTP client to use
+        method: HTTP method (GET, POST, PUT, etc.)
+        url: Request URL
+        **kwargs: Additional arguments passed to client.request()
+
+    Returns:
+        The HTTP response (may be 429 if all retries exhausted)
+    """
+    response = await client.request(method, url, **kwargs)
+
+    for attempt in range(MAX_RETRIES):
+        if response.status_code != HTTP_TOO_MANY_REQUESTS:
+            return response
+
+        # Get retry delay from header or use exponential backoff
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            delay = float(retry_after)
+        else:
+            delay = BASE_DELAY_SECONDS * (RETRY_MULTIPLIER**attempt)
+
+        logger.info(
+            "User request already processing (429), retrying in %.1fs (attempt %d/%d)",
+            delay,
+            attempt + 1,
+            MAX_RETRIES,
+        )
+        await asyncio.sleep(delay)
+        response = await client.request(method, url, **kwargs)
+
+    # Return last response (may be 429 if all retries exhausted)
+    return response
 
 
 async def send_text_message(
@@ -106,7 +150,9 @@ async def send_text_message(
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         try:
-            response = await client.post(url, headers=_get_auth_headers(), json=payload)
+            response = await _request_with_retry(
+                client, "POST", url, headers=_get_auth_headers(), json=payload
+            )
             response.raise_for_status()
             return ChatResponse.from_dict(response.json())
         except httpx.HTTPStatusError as e:
@@ -157,7 +203,9 @@ async def send_audio_message(
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         try:
-            response = await client.post(url, headers=_get_auth_headers(), json=payload)
+            response = await _request_with_retry(
+                client, "POST", url, headers=_get_auth_headers(), json=payload
+            )
             response.raise_for_status()
             return ChatResponse.from_dict(response.json())
         except httpx.HTTPStatusError as e:
@@ -178,7 +226,7 @@ async def get_user_preferences(user_id: str) -> UserPreferences | None:
     Returns:
         UserPreferences if successful, None otherwise
     """
-    url = f"{config.ENGINE_BASE_URL}/api/v1/users/{user_id}/preferences"
+    url = f"{config.ENGINE_BASE_URL}/api/v1/orgs/{config.ENGINE_ORG}/users/{user_id}/preferences"
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         try:
@@ -209,14 +257,10 @@ async def update_user_preferences(
     Returns:
         Updated UserPreferences if successful, None otherwise
     """
-    url = f"{config.ENGINE_BASE_URL}/api/v1/users/{user_id}/preferences"
-    payload: dict[str, str | bool] = {}
+    url = f"{config.ENGINE_BASE_URL}/api/v1/orgs/{config.ENGINE_ORG}/users/{user_id}/preferences"
+    payload: dict[str, str] = {}
     if preferences.response_language is not None:
         payload["response_language"] = preferences.response_language
-    if preferences.agentic_strength is not None:
-        payload["agentic_strength"] = preferences.agentic_strength
-    if preferences.dev_agentic_mcp is not None:
-        payload["dev_agentic_mcp"] = preferences.dev_agentic_mcp
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         try:

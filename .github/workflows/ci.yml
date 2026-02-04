@@ -2,74 +2,44 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - "**"
+    branches: [main]
 
 jobs:
-  build-test:
+  lint:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      # Required config envs (safe defaults for tests)
-      META_VERIFY_TOKEN: "verifytoken"
-      META_WHATSAPP_TOKEN: "whatsapptoken"
-      META_PHONE_NUMBER_ID: "1234567890"
-      META_APP_SECRET: "testsecret"
-      FACEBOOK_USER_AGENT: "facebookexternalua"
-      IN_META_SANDBOX_MODE: "False"
-      META_SANDBOX_PHONE_NUMBER: "15555555555"
-      MESSAGE_AGE_CUTOFF_IN_SECONDS: "3600"
-      ENGINE_BASE_URL: "http://localhost:8000"
-      ENGINE_API_KEY: "test-api-key"
-      LOG_PSEUDONYM_SECRET: "test-secret"
-      LOG_LEVEL: "info"
-      PYTHONPATH: "${{ github.workspace }}"
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install
+      - run: pnpm run format:check
+      - run: pnpm run lint
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e ".[dev]"
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install
+      - run: pnpm run check
 
-      - name: Ruff (format check)
-        run: ruff format --check whatsapp_gateway
-
-      - name: Ruff (lint)
-        run: ruff check .
-
-      - name: Pylint
-        run: pylint -rn -sn $(git ls-files '*.py')
-
-      - name: Mypy
-        run: mypy .
-
-      - name: Pyright
-        run: pyright
-
-      - name: Import Linter
-        run: lint-imports
-
-      - name: Bandit
-        run: bandit -q -r whatsapp_gateway
-
-      - name: Pip Audit
-        run: pip-audit -r requirements.txt
-
-      - name: Deptry
-        run: deptry . --ignore DEP002
-
-      - name: Pytest (coverage)
-        run: pytest --cov=whatsapp_gateway --cov-report=term-missing --cov-fail-under=55
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install
+      - run: pnpm test

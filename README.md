@@ -1,19 +1,18 @@
 # bt-servant-whatsapp-gateway
 
-A FastAPI gateway service that handles Meta/WhatsApp webhook integration for the [bt-servant-engine](https://github.com/unfoldingWord/bt-servant-engine).
+A Cloudflare Worker gateway service that handles Meta/WhatsApp webhook integration for the [bt-servant-worker](https://github.com/unfoldingWord/bt-servant-worker).
 
 ## Overview
 
-This gateway acts as a bridge between WhatsApp (via Meta's Cloud API) and the BT Servant Engine. It:
+This gateway acts as a bridge between WhatsApp (via Meta's Cloud API) and the BT Servant Worker. It:
 
 - Receives incoming WhatsApp messages via Meta webhooks
 - Validates request signatures and authenticates requests
-- Forwards messages to the engine's REST API for processing
+- Forwards messages to the worker's REST API for processing
 - Sends responses back to users via WhatsApp
 - Handles message chunking for WhatsApp's character limits
-- Supports both text and voice messages
 
-**Key Design Principle**: This gateway has **zero OpenAI dependency**. All AI processing (transcription, language models, text-to-speech) happens in the engine.
+**Key Design Principle**: This gateway has **zero AI dependency**. All AI processing happens in the worker.
 
 ## Architecture
 
@@ -21,27 +20,23 @@ This gateway acts as a bridge between WhatsApp (via Meta's Cloud API) and the BT
 ┌─────────────────┐      ┌─────────────────────┐      ┌─────────────────┐
 │                 │      │                     │      │                 │
 │  Meta/WhatsApp  │─────▶│  WhatsApp Gateway   │─────▶│  BT Servant     │
-│  Cloud API      │◀─────│  (this service)     │◀─────│  Engine         │
+│  Cloud API      │◀─────│  (Cloudflare Worker)│◀─────│  Worker         │
 │                 │      │                     │      │                 │
 └─────────────────┘      └─────────────────────┘      └─────────────────┘
 ```
 
-The gateway follows a strict **onion/hexagonal architecture**:
+### waitUntil Pattern
 
-```
-routes/     → HTTP handlers (FastAPI routes)
-services/   → Business logic (engine client, message handling, chunking)
-meta_api/   → Meta/WhatsApp API client (send messages, verify signatures)
-core/       → Domain models (no external dependencies)
-```
+The gateway uses Cloudflare's `waitUntil()` pattern to return 200 immediately to Meta, then process the webhook in the background. This prevents Meta from timing out and retrying during long AI processing.
 
 ## Quick Start
 
 ### Prerequisites
 
-- Python 3.12+
+- Node.js 20+
+- pnpm 9+
 - Access to Meta WhatsApp Business API
-- Running instance of [bt-servant-engine](https://github.com/unfoldingWord/bt-servant-engine)
+- Running instance of [bt-servant-worker](https://github.com/unfoldingWord/bt-servant-worker)
 
 ### Installation
 
@@ -50,21 +45,16 @@ core/       → Domain models (no external dependencies)
 git clone https://github.com/unfoldingWord/bt-servant-whatsapp-gateway.git
 cd bt-servant-whatsapp-gateway
 
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-
 # Install dependencies
-pip install -r requirements.txt
-pip install -e ".[dev]"  # Include dev dependencies
+pnpm install
 
 # Copy environment template
-cp .env.example .env
+cp .dev.vars.example .dev.vars
 ```
 
 ### Configuration
 
-Edit `.env` with your settings:
+Create `.dev.vars` with your secrets (for local development):
 
 ```bash
 # Meta/WhatsApp API
@@ -74,44 +64,60 @@ META_PHONE_NUMBER_ID=your_phone_number_id
 META_APP_SECRET=your_app_secret
 
 # Engine Connection
-ENGINE_BASE_URL=http://localhost:8000
 ENGINE_API_KEY=your_engine_api_key
 
 # Progress Callbacks (optional)
-GATEWAY_PUBLIC_URL=https://your-gateway.example.com  # Required for progress updates
-PROGRESS_THROTTLE_SECONDS=3.0
+GATEWAY_PUBLIC_URL=https://your-gateway.example.com
+```
 
-# Optional
-LOG_LEVEL=INFO
-IN_META_SANDBOX_MODE=false
-MESSAGE_AGE_CUTOFF_IN_SECONDS=3600
+Variables in `wrangler.toml`:
+
+```toml
+[vars]
+ENGINE_BASE_URL = "https://api.btservant.ai"
+ENGINE_ORG = "unfoldingWord"
+CHUNK_SIZE = "1500"
+MESSAGE_AGE_CUTOFF_SECONDS = "3600"
+PROGRESS_THROTTLE_SECONDS = "3.0"
 ```
 
 ### Running
 
 ```bash
 # Development
-uvicorn whatsapp_gateway.main:app --reload
+pnpm dev
 
-# Production
-uvicorn whatsapp_gateway.main:app --host 0.0.0.0 --port 8000
+# Deploy
+pnpm deploy
+```
+
+### Setting Secrets
+
+```bash
+wrangler secret put META_VERIFY_TOKEN
+wrangler secret put META_WHATSAPP_TOKEN
+wrangler secret put META_PHONE_NUMBER_ID
+wrangler secret put META_APP_SECRET
+wrangler secret put ENGINE_API_KEY
+wrangler secret put GATEWAY_PUBLIC_URL  # Optional
 ```
 
 ### Webhook Setup
 
 Configure your Meta webhook to point to:
-- **Verify endpoint**: `GET https://your-domain/meta-whatsapp`
-- **Webhook endpoint**: `POST https://your-domain/meta-whatsapp`
+
+- **Verify endpoint**: `GET https://your-worker.workers.dev/meta-whatsapp`
+- **Webhook endpoint**: `POST https://your-worker.workers.dev/meta-whatsapp`
 
 ## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/meta-whatsapp` | GET | Meta webhook verification |
-| `/meta-whatsapp` | POST | Receive WhatsApp messages |
-| `/progress-callback` | POST | Receive progress updates from engine |
-| `/health` | GET | Health check |
-| `/` | GET | Service info |
+| Endpoint             | Method | Description                          |
+| -------------------- | ------ | ------------------------------------ |
+| `/meta-whatsapp`     | GET    | Meta webhook verification            |
+| `/meta-whatsapp`     | POST   | Receive WhatsApp messages            |
+| `/progress-callback` | POST   | Receive progress updates from engine |
+| `/health`            | GET    | Health check                         |
+| `/`                  | GET    | Service info                         |
 
 ## Development
 
@@ -119,87 +125,80 @@ Configure your Meta webhook to point to:
 
 ```bash
 # Linting
-ruff check .
-ruff format .
+pnpm lint
+
+# Format
+pnpm format
 
 # Type checking
-mypy .
-pyright
-
-# Architecture compliance
-lint-imports
+pnpm check
 
 # Run all checks
-pre-commit run --all-files
+pnpm lint && pnpm check && pnpm test
 ```
 
 ### Testing
 
 ```bash
 # Run tests
-pytest
+pnpm test
 
-# With coverage
-pytest --cov=whatsapp_gateway --cov-fail-under=55
+# Watch mode
+pnpm test:watch
 ```
 
 ### Pre-commit Hooks
 
-```bash
-# Install hooks
-pre-commit install
-pre-commit install --hook-type pre-push
-```
+Hooks are installed automatically via husky when you run `pnpm install`.
 
 ## Project Structure
 
 ```
 bt-servant-whatsapp-gateway/
-├── whatsapp_gateway/
-│   ├── __init__.py
-│   ├── config.py              # Settings via pydantic-settings
-│   ├── main.py                # FastAPI app factory
-│   ├── core/
-│   │   ├── __init__.py
-│   │   └── models.py          # IncomingMessage, MessageType
-│   ├── meta_api/
-│   │   ├── __init__.py
-│   │   ├── client.py          # WhatsApp API client
-│   │   └── signature.py       # Webhook signature verification
-│   ├── routes/
-│   │   ├── __init__.py
-│   │   ├── health.py          # Health endpoints
-│   │   └── webhooks.py        # Meta webhook handlers
-│   └── services/
-│       ├── __init__.py
-│       ├── chunking.py        # Message chunking (1500 char limit)
-│       ├── engine_client.py   # HTTP client for engine API
-│       └── message_handler.py # Message processing orchestration
+├── src/
+│   ├── index.ts                 # Main Worker entry (Hono app)
+│   ├── config/
+│   │   └── types.ts             # Env interface
+│   ├── types/
+│   │   ├── meta.ts              # Meta webhook types
+│   │   └── engine.ts            # Engine API types
+│   ├── services/
+│   │   ├── meta-api/
+│   │   │   ├── client.ts        # Send messages to WhatsApp
+│   │   │   └── signature.ts     # HMAC verification
+│   │   ├── engine-client.ts     # Call bt-servant-worker API
+│   │   ├── message-handler.ts   # Orchestration logic
+│   │   └── chunking.ts          # Message chunking
+│   └── utils/
+│       ├── crypto.ts            # Constant-time compare
+│       └── logger.ts            # Structured logging
 ├── tests/
-├── .env.example
-├── .importlinter              # Architecture rules
-├── .pre-commit-config.yaml
-├── pyproject.toml
-├── requirements.txt
-├── CLAUDE.md                  # AI coding guidelines
+│   ├── unit/
+│   └── e2e/
+├── package.json
+├── wrangler.toml
+├── tsconfig.json
+├── vitest.config.ts
+├── eslint.config.js
+├── CLAUDE.md                    # AI coding guidelines
 └── README.md
 ```
 
 ## How It Works
 
 1. **Webhook Received**: Meta sends a POST request when a user sends a WhatsApp message
-2. **Validation**: Gateway verifies the signature and user agent
-3. **Message Parsing**: Extracts message content (text or audio media ID)
-4. **Audio Handling**: If voice message, downloads audio from Meta
+2. **Immediate Response**: Gateway returns 200 immediately (waitUntil pattern)
+3. **Validation**: In background, verifies the signature and user agent
+4. **Message Parsing**: Extracts message content (text only; voice temporarily disabled)
 5. **Engine Request**: Sends message to engine's `/api/v1/chat` endpoint with callback URL
 6. **Progress Updates**: Engine sends progress updates to `/progress-callback` during processing
-7. **Response Processing**: Engine returns text (and optional voice audio)
+7. **Response Processing**: Engine returns text response
 8. **Chunking**: Long responses are split into WhatsApp-friendly chunks (≤1500 chars)
 9. **Send Response**: Gateway sends response(s) back via WhatsApp API
 
 ## Related Projects
 
-- [bt-servant-engine](https://github.com/unfoldingWord/bt-servant-engine) - The core AI engine for Bible translation assistance
+- [bt-servant-worker](https://github.com/unfoldingWord/bt-servant-worker) - The core AI worker for Bible translation assistance
 
 ## License
 

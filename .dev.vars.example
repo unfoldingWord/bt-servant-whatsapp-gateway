@@ -1,0 +1,12 @@
+# Meta/WhatsApp API Secrets
+META_VERIFY_TOKEN=your_webhook_verify_token
+META_WHATSAPP_TOKEN=your_whatsapp_api_token
+META_PHONE_NUMBER_ID=your_phone_number_id
+META_APP_SECRET=your_app_secret
+
+# Engine Connection
+ENGINE_API_KEY=your_engine_api_key
+
+# Progress Callbacks (optional)
+# Set to your worker's public URL to enable progress updates
+# GATEWAY_PUBLIC_URL=https://your-gateway.workers.dev

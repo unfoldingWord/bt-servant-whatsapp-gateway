@@ -152,12 +152,13 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
   // Send typing indicator
   await sendTypingIndicator(message.messageId, env);
 
-  // Call engine
+  // Call engine (pass messageId as message_key for progress callbacks)
   const response = await sendToEngine(
     message.userId,
     message.text,
     env,
-    getProgressCallbackUrl(env)
+    getProgressCallbackUrl(env),
+    message.messageId
   );
 
   if (!response) {

@@ -8,6 +8,7 @@ export interface ChatRequest {
   user_id: string;
   message: string;
   message_type: 'text' | 'audio';
+  message_key?: string;
   progress_callback_url?: string;
   progress_throttle_seconds?: number;
 }

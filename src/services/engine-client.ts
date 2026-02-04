@@ -73,7 +73,8 @@ export async function sendTextMessage(
   userId: string,
   message: string,
   env: Env,
-  progressCallbackUrl?: string
+  progressCallbackUrl?: string,
+  messageKey?: string
 ): Promise<ChatResponse | null> {
   const url = `${env.ENGINE_BASE_URL}/api/v1/chat`;
 
@@ -84,8 +85,9 @@ export async function sendTextMessage(
     message_type: 'text',
   };
 
-  if (progressCallbackUrl) {
+  if (progressCallbackUrl && messageKey) {
     payload.progress_callback_url = progressCallbackUrl;
+    payload.message_key = messageKey;
     payload.progress_throttle_seconds = parseFloat(env.PROGRESS_THROTTLE_SECONDS);
   }
 

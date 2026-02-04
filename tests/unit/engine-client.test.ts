@@ -68,7 +68,43 @@ describe('engine-client', () => {
       );
     });
 
-    it('should include progress callback when provided', async () => {
+    it('should include progress callback when url and message_key provided', async () => {
+      const mockResponse = {
+        responses: ['Hello!'],
+        response_language: 'en',
+        voice_audio_base64: null,
+      };
+
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse,
+      });
+
+      await sendTextMessage(
+        'user123',
+        'Hi there',
+        mockEnv,
+        'https://gateway.example.com/progress-callback',
+        'wamid.123456'
+      );
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:8787/api/v1/chat',
+        expect.objectContaining({
+          body: JSON.stringify({
+            client_id: 'whatsapp',
+            user_id: 'user123',
+            message: 'Hi there',
+            message_type: 'text',
+            progress_callback_url: 'https://gateway.example.com/progress-callback',
+            message_key: 'wamid.123456',
+            progress_throttle_seconds: 3.0,
+          }),
+        })
+      );
+    });
+
+    it('should not include progress callback if message_key missing', async () => {
       const mockResponse = {
         responses: ['Hello!'],
         response_language: 'en',
@@ -85,6 +121,7 @@ describe('engine-client', () => {
         'Hi there',
         mockEnv,
         'https://gateway.example.com/progress-callback'
+        // no message_key
       );
 
       expect(fetchMock).toHaveBeenCalledWith(
@@ -95,8 +132,6 @@ describe('engine-client', () => {
             user_id: 'user123',
             message: 'Hi there',
             message_type: 'text',
-            progress_callback_url: 'https://gateway.example.com/progress-callback',
-            progress_throttle_seconds: 3.0,
           }),
         })
       );

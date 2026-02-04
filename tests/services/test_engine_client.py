@@ -33,7 +33,7 @@ class TestChatResponse:
         """Test from_dict with minimal fields."""
         data: dict[str, object] = {}
         response = ChatResponse.from_dict(data)
-        assert response.responses == []
+        assert not response.responses
         assert response.response_language == "en"
         assert response.voice_audio_base64 is None
 

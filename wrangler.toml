@@ -1,6 +1,7 @@
 name = "bt-servant-whatsapp-gateway"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
+account_id = "5a3ffd86280d3ed086be76d955829242"
 
 [observability]
 enabled = true

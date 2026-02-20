@@ -17,6 +17,7 @@ import {
   handleCompletionCallback,
   handleProgressCallback,
   validateCompletionCallback,
+  validateProgressCallback,
 } from './services/message-handler';
 import { logger } from './utils/logger';
 
@@ -142,16 +143,19 @@ app.post('/completion-callback', async (c) => {
   const cached = await cache.match(cacheKey);
   if (cached) {
     logger.info('Duplicate completion callback, skipping', { messageId: callback.message_id });
-    return c.text('OK', 200);
+    return c.text('OK', 200, { 'X-Deduplicated': 'true' });
   }
+
+  // Write marker optimistically; delete on failure so retries can succeed
   await cache.put(cacheKey, new Response(null, { headers: { 'Cache-Control': 'max-age=3600' } }));
 
   // Process in background
   c.executionCtx.waitUntil(
-    handleCompletionCallback(callback, c.env).catch((error) => {
+    handleCompletionCallback(callback, c.env).catch(async (error) => {
       logger.error('Error processing completion callback', {
         error: error instanceof Error ? error.message : String(error),
       });
+      await cache.delete(cacheKey);
     })
   );
 
@@ -174,13 +178,22 @@ app.post('/progress-callback', async (c) => {
     return c.text('Unauthorized', 401);
   }
 
-  let callback: ProgressCallback;
+  let body: unknown;
   try {
-    callback = await c.req.json();
+    body = await c.req.json();
   } catch {
     logger.error('Invalid JSON in progress callback');
     return c.json({ error: 'Invalid JSON' }, 400);
   }
+
+  // Validate payload schema before dispatching to background
+  const validationError = validateProgressCallback(body);
+  if (validationError) {
+    logger.error('Invalid progress callback payload', { error: validationError });
+    return c.json({ error: validationError }, 400);
+  }
+
+  const callback = body as ProgressCallback;
 
   // Process in background
   c.executionCtx.waitUntil(

@@ -260,6 +260,24 @@ export async function handleCompletionCallback(
 }
 
 /**
+ * Validate a progress callback payload has the required shape.
+ * Returns an error string if invalid, null if valid.
+ */
+export function validateProgressCallback(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return 'Payload must be an object';
+  }
+
+  const p = payload as Record<string, unknown>;
+
+  if (!isNonEmptyString(p.user_id)) return 'Missing or invalid user_id';
+  if (!isNonEmptyString(p.message_key)) return 'Missing or invalid message_key';
+  if (typeof p.text !== 'string') return 'Missing or invalid text';
+
+  return null;
+}
+
+/**
  * Handle a progress callback from the engine.
  */
 export async function handleProgressCallback(callback: ProgressCallback, env: Env): Promise<void> {

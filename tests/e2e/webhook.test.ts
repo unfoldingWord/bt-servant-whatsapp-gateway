@@ -350,21 +350,23 @@ describe('webhook routes', () => {
         'X-Engine-Token': env.ENGINE_API_KEY,
       };
 
-      // First call should be accepted
+      // First call should be accepted and processed (no dedup header)
       const first = await SELF.fetch('http://localhost/completion-callback', {
         method: 'POST',
         headers,
         body: payload,
       });
       expect(first.status).toBe(200);
+      expect(first.headers.get('X-Deduplicated')).toBeNull();
 
-      // Second call with same message_id should also return 200 (idempotent)
+      // Second call should be idempotent: 200 with dedup header, no re-processing
       const second = await SELF.fetch('http://localhost/completion-callback', {
         method: 'POST',
         headers,
         body: payload,
       });
       expect(second.status).toBe(200);
+      expect(second.headers.get('X-Deduplicated')).toBe('true');
     });
   });
 
@@ -429,6 +431,57 @@ describe('webhook routes', () => {
           'X-Engine-Token': env.ENGINE_API_KEY,
         },
         body: 'not valid json',
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject callback missing user_id', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Engine-Token': env.ENGINE_API_KEY,
+        },
+        body: JSON.stringify({
+          message_key: 'key',
+          text: 'Progress',
+          timestamp: Date.now(),
+        }),
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject callback missing message_key', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Engine-Token': env.ENGINE_API_KEY,
+        },
+        body: JSON.stringify({
+          user_id: 'test',
+          text: 'Progress',
+          timestamp: Date.now(),
+        }),
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject callback missing text', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Engine-Token': env.ENGINE_API_KEY,
+        },
+        body: JSON.stringify({
+          user_id: 'test',
+          message_key: 'key',
+          timestamp: Date.now(),
+        }),
       });
 
       expect(response.status).toBe(400);

@@ -195,7 +195,10 @@ export async function sendResponses(userId: string, responses: string[], env: En
   for (const text of responses) {
     const chunks = chunkMessage(text, chunkSize);
     for (const chunk of chunks) {
-      await sendToWhatsApp(userId, chunk, env);
+      const sent = await sendToWhatsApp(userId, chunk, env);
+      if (!sent) {
+        throw new Error(`Failed to send WhatsApp message to ${userId.slice(0, 8)}...`);
+      }
     }
   }
 }
@@ -251,11 +254,14 @@ export async function handleCompletionCallback(
   } else if (callback.status === 'error') {
     const errorMsg = callback.error ?? 'Unknown error';
     logger.error('Engine reported error', { error: errorMsg });
-    await sendToWhatsApp(
+    const sent = await sendToWhatsApp(
       callback.user_id,
       'Sorry, I encountered an error processing your message. Please try again.',
       env
     );
+    if (!sent) {
+      throw new Error(`Failed to send error message to ${callback.user_id.slice(0, 8)}...`);
+    }
   }
 }
 

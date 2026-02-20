@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { sendTextMessage } from '../../src/services/engine-client';
+import { sendMessage } from '../../src/services/engine-client';
 import type { Env } from '../../src/config/types';
 
 // Mock environment
@@ -26,20 +26,17 @@ describe('engine-client', () => {
   beforeEach(() => {
     fetchMock = vi.fn();
     globalThis.fetch = fetchMock;
-    vi.useFakeTimers();
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
-    vi.useRealTimers();
   });
 
-  describe('sendTextMessage', () => {
-    it('should send a text message successfully', async () => {
+  describe('sendMessage', () => {
+    it('should send a message successfully', async () => {
       const mockResponse = {
-        responses: ['Hello!'],
-        response_language: 'en',
-        voice_audio_base64: null,
+        message_id: 'msg-123',
+        queue_position: 0,
       };
 
       fetchMock.mockResolvedValueOnce({
@@ -47,11 +44,16 @@ describe('engine-client', () => {
         json: async () => mockResponse,
       });
 
-      const result = await sendTextMessage('user123', 'Hi there', mockEnv);
+      const result = await sendMessage(
+        'user123',
+        'Hi there',
+        mockEnv,
+        'https://gateway.example.com/completion-callback'
+      );
 
       expect(result).toEqual(mockResponse);
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:8787/api/v1/chat',
+        'http://localhost:8787/api/v1/message',
         expect.objectContaining({
           method: 'POST',
           headers: {
@@ -61,18 +63,19 @@ describe('engine-client', () => {
           body: JSON.stringify({
             client_id: 'whatsapp',
             user_id: 'user123',
+            org_id: 'test-org',
             message: 'Hi there',
             message_type: 'text',
+            callback_url: 'https://gateway.example.com/completion-callback',
           }),
         })
       );
     });
 
-    it('should include progress callback when url and message_key provided', async () => {
+    it('should include progress callback when url provided', async () => {
       const mockResponse = {
-        responses: ['Hello!'],
-        response_language: 'en',
-        voice_audio_base64: null,
+        message_id: 'msg-456',
+        queue_position: 1,
       };
 
       fetchMock.mockResolvedValueOnce({
@@ -80,35 +83,35 @@ describe('engine-client', () => {
         json: async () => mockResponse,
       });
 
-      await sendTextMessage(
+      await sendMessage(
         'user123',
         'Hi there',
         mockEnv,
-        'https://gateway.example.com/progress-callback',
-        'wamid.123456'
+        'https://gateway.example.com/completion-callback',
+        'https://gateway.example.com/progress-callback'
       );
 
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:8787/api/v1/chat',
+        'http://localhost:8787/api/v1/message',
         expect.objectContaining({
           body: JSON.stringify({
             client_id: 'whatsapp',
             user_id: 'user123',
+            org_id: 'test-org',
             message: 'Hi there',
             message_type: 'text',
+            callback_url: 'https://gateway.example.com/completion-callback',
             progress_callback_url: 'https://gateway.example.com/progress-callback',
-            message_key: 'wamid.123456',
             progress_throttle_seconds: 3.0,
           }),
         })
       );
     });
 
-    it('should not include progress callback if message_key missing', async () => {
+    it('should not include progress callback when url not provided', async () => {
       const mockResponse = {
-        responses: ['Hello!'],
-        response_language: 'en',
-        voice_audio_base64: null,
+        message_id: 'msg-789',
+        queue_position: 0,
       };
 
       fetchMock.mockResolvedValueOnce({
@@ -116,22 +119,23 @@ describe('engine-client', () => {
         json: async () => mockResponse,
       });
 
-      await sendTextMessage(
+      await sendMessage(
         'user123',
         'Hi there',
         mockEnv,
-        'https://gateway.example.com/progress-callback'
-        // no message_key
+        'https://gateway.example.com/completion-callback'
       );
 
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:8787/api/v1/chat',
+        'http://localhost:8787/api/v1/message',
         expect.objectContaining({
           body: JSON.stringify({
             client_id: 'whatsapp',
             user_id: 'user123',
+            org_id: 'test-org',
             message: 'Hi there',
             message_type: 'text',
+            callback_url: 'https://gateway.example.com/completion-callback',
           }),
         })
       );
@@ -144,7 +148,12 @@ describe('engine-client', () => {
         text: async () => 'Internal Server Error',
       });
 
-      const result = await sendTextMessage('user123', 'Hi there', mockEnv);
+      const result = await sendMessage(
+        'user123',
+        'Hi there',
+        mockEnv,
+        'https://gateway.example.com/completion-callback'
+      );
 
       expect(result).toBeNull();
     });
@@ -152,66 +161,14 @@ describe('engine-client', () => {
     it('should return null on network error', async () => {
       fetchMock.mockRejectedValueOnce(new Error('Network error'));
 
-      const result = await sendTextMessage('user123', 'Hi there', mockEnv);
+      const result = await sendMessage(
+        'user123',
+        'Hi there',
+        mockEnv,
+        'https://gateway.example.com/completion-callback'
+      );
 
       expect(result).toBeNull();
-    });
-
-    it('should retry on 429 with Retry-After header', async () => {
-      // First call returns 429, second succeeds
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 429,
-          headers: new Headers({ 'Retry-After': '1' }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({
-            responses: ['Success after retry'],
-            response_language: 'en',
-            voice_audio_base64: null,
-          }),
-        });
-
-      const resultPromise = sendTextMessage('user123', 'Hi there', mockEnv);
-
-      // Advance timers to trigger the retry
-      await vi.advanceTimersByTimeAsync(1000);
-
-      const result = await resultPromise;
-
-      expect(result).toEqual({
-        responses: ['Success after retry'],
-        response_language: 'en',
-        voice_audio_base64: null,
-      });
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-    });
-
-    it('should retry on 429 with exponential backoff', async () => {
-      // All calls return 429
-      for (let i = 0; i < 6; i++) {
-        fetchMock.mockResolvedValueOnce({
-          ok: false,
-          status: 429,
-          headers: new Headers(),
-        });
-      }
-
-      const resultPromise = sendTextMessage('user123', 'Hi there', mockEnv);
-
-      // Advance timers through all retries
-      // Delays: 2000, 3000, 4500, 6750, 10125 ms
-      for (let i = 0; i < 5; i++) {
-        await vi.advanceTimersByTimeAsync(15000);
-      }
-
-      const result = await resultPromise;
-
-      // Should have made initial request + 5 retries = 6 total
-      expect(result).toBeNull();
-      expect(fetchMock).toHaveBeenCalledTimes(6);
     });
   });
 });

@@ -11,7 +11,7 @@ export interface Env {
   META_PHONE_NUMBER_ID: string;
   META_APP_SECRET: string;
   ENGINE_API_KEY: string;
-  GATEWAY_PUBLIC_URL?: string;
+  GATEWAY_PUBLIC_URL: string;
 
   // Variables (from wrangler.toml)
   ENVIRONMENT: string;

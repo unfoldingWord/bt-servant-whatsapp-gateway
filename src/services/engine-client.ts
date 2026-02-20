@@ -3,26 +3,11 @@
  */
 
 import type { Env } from '../config/types';
-import type { ChatRequest, ChatResponse } from '../types/engine';
+import type { MessageRequest, QueuedResponse } from '../types/engine';
 import { logger } from '../utils/logger';
 
 /** Client identifier for this gateway */
 const CLIENT_ID = 'whatsapp';
-
-/** HTTP status codes */
-const HTTP_TOO_MANY_REQUESTS = 429;
-
-/** Retry settings for 429 responses */
-const MAX_RETRIES = 5;
-const BASE_DELAY_MS = 2000;
-const RETRY_MULTIPLIER = 1.5;
-
-/**
- * Sleep for a specified number of milliseconds.
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Get authorization headers for engine API.
@@ -35,64 +20,33 @@ function getAuthHeaders(env: Env): Record<string, string> {
 }
 
 /**
- * Make a request with retry on 429 (Too Many Requests).
- *
- * The worker returns 429 when a user's request is already being processed.
+ * Send a message to the engine for queued processing.
  */
-async function fetchWithRetry(url: string, options: RequestInit): Promise<Response> {
-  let response = await fetch(url, options);
-
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    if (response.status !== HTTP_TOO_MANY_REQUESTS) {
-      return response;
-    }
-
-    // Get retry delay from header or use exponential backoff
-    const retryAfter = response.headers.get('Retry-After');
-    const delay = retryAfter
-      ? parseFloat(retryAfter) * 1000
-      : BASE_DELAY_MS * Math.pow(RETRY_MULTIPLIER, attempt);
-
-    logger.info('User request already processing (429), retrying', {
-      delay: `${delay}ms`,
-      attempt: attempt + 1,
-      maxRetries: MAX_RETRIES,
-    });
-
-    await sleep(delay);
-    response = await fetch(url, options);
-  }
-
-  return response;
-}
-
-/**
- * Send a text message to the engine for processing.
- */
-export async function sendTextMessage(
+export async function sendMessage(
   userId: string,
   message: string,
   env: Env,
-  progressCallbackUrl?: string,
-  messageKey?: string
-): Promise<ChatResponse | null> {
-  const url = `${env.ENGINE_BASE_URL}/api/v1/chat`;
+  callbackUrl: string,
+  progressCallbackUrl?: string
+): Promise<QueuedResponse | null> {
+  const url = `${env.ENGINE_BASE_URL}/api/v1/message`;
 
-  const payload: ChatRequest = {
+  const payload: MessageRequest = {
     client_id: CLIENT_ID,
     user_id: userId,
+    org_id: env.ENGINE_ORG,
     message,
     message_type: 'text',
+    callback_url: callbackUrl,
   };
 
-  if (progressCallbackUrl && messageKey) {
+  if (progressCallbackUrl) {
     payload.progress_callback_url = progressCallbackUrl;
-    payload.message_key = messageKey;
     payload.progress_throttle_seconds = parseFloat(env.PROGRESS_THROTTLE_SECONDS);
   }
 
   try {
-    const response = await fetchWithRetry(url, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: getAuthHeaders(env),
       body: JSON.stringify(payload),
@@ -104,7 +58,7 @@ export async function sendTextMessage(
       return null;
     }
 
-    return (await response.json()) as ChatResponse;
+    return (await response.json()) as QueuedResponse;
   } catch (error) {
     logger.error('Engine connection error', {
       error: error instanceof Error ? error.message : String(error),

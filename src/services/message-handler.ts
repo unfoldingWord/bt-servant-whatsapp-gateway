@@ -10,9 +10,9 @@ import type {
   Contact,
   WebhookPayload,
 } from '../types/meta';
-import type { ChatResponse, ProgressCallback } from '../types/engine';
+import type { CompletionCallback, ProgressCallback } from '../types/engine';
 import { sendTextMessage as sendToWhatsApp, sendTypingIndicator } from './meta-api/client';
-import { sendTextMessage as sendToEngine } from './engine-client';
+import { sendMessage as sendToEngine } from './engine-client';
 import { chunkMessage } from './chunking';
 import { logger } from '../utils/logger';
 
@@ -88,12 +88,16 @@ function isMessageTooOld(timestamp: number, cutoffSeconds: number): boolean {
 }
 
 /**
- * Get the progress callback URL if configured.
+ * Get the completion callback URL.
  */
-function getProgressCallbackUrl(env: Env): string | undefined {
-  if (!env.GATEWAY_PUBLIC_URL) {
-    return undefined;
-  }
+function getCompletionCallbackUrl(env: Env): string {
+  return `${env.GATEWAY_PUBLIC_URL.replace(/\/$/, '')}/completion-callback`;
+}
+
+/**
+ * Get the progress callback URL.
+ */
+function getProgressCallbackUrl(env: Env): string {
   return `${env.GATEWAY_PUBLIC_URL.replace(/\/$/, '')}/progress-callback`;
 }
 
@@ -114,11 +118,39 @@ export async function handleWebhook(payload: WebhookPayload, env: Env): Promise<
 }
 
 /**
+ * Validate an incoming message. Returns the message if valid, undefined if it should be skipped.
+ */
+async function validateMessage(message: IncomingMessage, env: Env): Promise<boolean> {
+  const cutoffSeconds = parseInt(env.MESSAGE_AGE_CUTOFF_SECONDS, 10);
+
+  if (!isSupportedType(message.messageType)) {
+    logger.warn('Unsupported message type', { type: message.messageType });
+    return false;
+  }
+
+  if (isMessageTooOld(message.timestamp, cutoffSeconds)) {
+    const age = Math.floor(Date.now() / 1000) - message.timestamp;
+    logger.warn('Message too old, dropping', { age, cutoff: cutoffSeconds });
+    return false;
+  }
+
+  if (message.messageType === 'audio') {
+    await sendToWhatsApp(
+      message.userId,
+      'Voice messages are temporarily unavailable. Please send a text message.',
+      env
+    );
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Process a single incoming message.
  */
 async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): Promise<void> {
   const message = parseMessage(raw, contacts);
-  const cutoffSeconds = parseInt(env.MESSAGE_AGE_CUTOFF_SECONDS, 10);
 
   logger.info('Received message', {
     type: message.messageType,
@@ -126,43 +158,20 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
     userId: message.userId.slice(0, 8) + '...',
   });
 
-  // Skip unsupported message types
-  if (!isSupportedType(message.messageType)) {
-    logger.warn('Unsupported message type', { type: message.messageType });
-    return;
-  }
+  if (!(await validateMessage(message, env))) return;
 
-  // Skip old messages
-  if (isMessageTooOld(message.timestamp, cutoffSeconds)) {
-    const age = Math.floor(Date.now() / 1000) - message.timestamp;
-    logger.warn('Message too old, dropping', { age, cutoff: cutoffSeconds });
-    return;
-  }
-
-  // Reject voice messages (worker doesn't support STT)
-  if (message.messageType === 'audio') {
-    await sendToWhatsApp(
-      message.userId,
-      'Voice messages are temporarily unavailable. Please send a text message.',
-      env
-    );
-    return;
-  }
-
-  // Send typing indicator
   await sendTypingIndicator(message.messageId, env);
 
-  // Call engine (pass messageId as message_key for progress callbacks)
-  const response = await sendToEngine(
+  const result = await sendToEngine(
     message.userId,
     message.text,
     env,
-    getProgressCallbackUrl(env),
-    message.messageId
+    getCompletionCallbackUrl(env),
+    getProgressCallbackUrl(env)
   );
 
-  if (!response) {
-    logger.error('Failed to get response from engine');
+  if (!result) {
+    logger.error('Failed to queue message with engine');
     await sendToWhatsApp(
       message.userId,
       'Sorry, I encountered an error processing your message. Please try again.',
@@ -171,27 +180,107 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
     return;
   }
 
-  // Send responses back to user
-  await sendResponses(message.userId, response, env);
+  logger.info('Message queued', {
+    messageId: result.message_id,
+    queuePosition: result.queue_position,
+  });
 }
 
 /**
  * Send response(s) back to the user.
  */
-async function sendResponses(userId: string, response: ChatResponse, env: Env): Promise<void> {
+export async function sendResponses(userId: string, responses: string[], env: Env): Promise<void> {
   const chunkSize = parseInt(env.CHUNK_SIZE, 10);
 
-  // Send voice response if available (not supported in worker)
-  // If voice_audio_base64 is present, we could send it but Workers can't upload media
-  // So we always fall back to text
-
-  // Send text responses (may need chunking)
-  for (const text of response.responses) {
+  for (const text of responses) {
     const chunks = chunkMessage(text, chunkSize);
     for (const chunk of chunks) {
-      await sendToWhatsApp(userId, chunk, env);
+      const sent = await sendToWhatsApp(userId, chunk, env);
+      if (!sent) {
+        throw new Error(`Failed to send WhatsApp message to ${userId.slice(0, 8)}...`);
+      }
     }
   }
+}
+
+function isNonEmptyString(value: unknown): boolean {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isStringArray(value: unknown): boolean {
+  return Array.isArray(value) && value.every((r: unknown) => typeof r === 'string');
+}
+
+/**
+ * Validate a completion callback payload has the required shape.
+ * Returns an error string if invalid, null if valid.
+ */
+export function validateCompletionCallback(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return 'Payload must be an object';
+  }
+
+  const p = payload as Record<string, unknown>;
+
+  if (!isNonEmptyString(p.message_id)) return 'Missing or invalid message_id';
+  if (!isNonEmptyString(p.user_id)) return 'Missing or invalid user_id';
+
+  if (p.status !== 'completed' && p.status !== 'error') {
+    return 'Invalid status (must be "completed" or "error")';
+  }
+
+  if (p.status === 'completed' && !isStringArray(p.responses)) {
+    return 'Completed callback must include responses as string[]';
+  }
+
+  return null;
+}
+
+/**
+ * Handle a completion callback from the engine.
+ */
+export async function handleCompletionCallback(
+  callback: CompletionCallback,
+  env: Env
+): Promise<void> {
+  logger.info('Completion callback received', {
+    messageId: callback.message_id,
+    userId: callback.user_id.slice(0, 8) + '...',
+    status: callback.status,
+  });
+
+  if (callback.status === 'completed' && callback.responses) {
+    await sendResponses(callback.user_id, callback.responses, env);
+  } else if (callback.status === 'error') {
+    const errorMsg = callback.error ?? 'Unknown error';
+    logger.error('Engine reported error', { error: errorMsg });
+    const sent = await sendToWhatsApp(
+      callback.user_id,
+      'Sorry, I encountered an error processing your message. Please try again.',
+      env
+    );
+    if (!sent) {
+      throw new Error(`Failed to send error message to ${callback.user_id.slice(0, 8)}...`);
+    }
+  }
+}
+
+/**
+ * Validate a progress callback payload has the required shape.
+ * Returns an error string if invalid, null if valid.
+ */
+export function validateProgressCallback(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return 'Payload must be an object';
+  }
+
+  const p = payload as Record<string, unknown>;
+
+  if (!isNonEmptyString(p.user_id)) return 'Missing or invalid user_id';
+  if (!isNonEmptyString(p.message_key)) return 'Missing or invalid message_key';
+  if (typeof p.text !== 'string') return 'Missing or invalid text';
+
+  return null;
 }
 
 /**

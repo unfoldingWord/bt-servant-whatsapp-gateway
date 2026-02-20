@@ -166,6 +166,93 @@ describe('webhook routes', () => {
     });
   });
 
+  describe('POST /completion-callback', () => {
+    it('should reject without engine token', async () => {
+      const response = await SELF.fetch('http://localhost/completion-callback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message_id: 'msg-123',
+          user_id: 'test',
+          status: 'completed',
+          responses: ['Hello!'],
+        }),
+      });
+
+      expect(response.status).toBe(401);
+    });
+
+    it('should reject with wrong engine token', async () => {
+      const response = await SELF.fetch('http://localhost/completion-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Engine-Token': 'wrong-token',
+        },
+        body: JSON.stringify({
+          message_id: 'msg-123',
+          user_id: 'test',
+          status: 'completed',
+          responses: ['Hello!'],
+        }),
+      });
+
+      expect(response.status).toBe(401);
+    });
+
+    it('should accept valid completed callback', async () => {
+      const response = await SELF.fetch('http://localhost/completion-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Engine-Token': env.ENGINE_API_KEY,
+        },
+        body: JSON.stringify({
+          message_id: 'msg-123',
+          user_id: 'test',
+          status: 'completed',
+          responses: ['Hello!'],
+          response_language: 'en',
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('OK');
+    });
+
+    it('should accept valid error callback', async () => {
+      const response = await SELF.fetch('http://localhost/completion-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Engine-Token': env.ENGINE_API_KEY,
+        },
+        body: JSON.stringify({
+          message_id: 'msg-456',
+          user_id: 'test',
+          status: 'error',
+          error: 'Something went wrong',
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('OK');
+    });
+
+    it('should reject malformed JSON', async () => {
+      const response = await SELF.fetch('http://localhost/completion-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Engine-Token': env.ENGINE_API_KEY,
+        },
+        body: 'not valid json',
+      });
+
+      expect(response.status).toBe(400);
+    });
+  });
+
   describe('POST /progress-callback', () => {
     it('should reject without engine token', async () => {
       const response = await SELF.fetch('http://localhost/progress-callback', {

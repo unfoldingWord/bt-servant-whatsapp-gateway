@@ -10,9 +10,13 @@
 import { Hono } from 'hono';
 import type { Env } from './config/types';
 import type { WebhookPayload } from './types/meta';
-import type { ProgressCallback } from './types/engine';
+import type { CompletionCallback, ProgressCallback } from './types/engine';
 import { verifyFacebookSignature } from './services/meta-api/signature';
-import { handleWebhook, handleProgressCallback } from './services/message-handler';
+import {
+  handleWebhook,
+  handleCompletionCallback,
+  handleProgressCallback,
+} from './services/message-handler';
 import { logger } from './utils/logger';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -79,6 +83,41 @@ app.post('/meta-whatsapp', async (c) => {
   c.executionCtx.waitUntil(
     handleWebhook(payload, c.env).catch((error) => {
       logger.error('Error processing webhook', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    })
+  );
+
+  return c.text('OK', 200);
+});
+
+/**
+ * Completion callback from engine.
+ *
+ * The engine POSTs here when a user's queued message has been fully processed.
+ * The response is forwarded to the user via WhatsApp.
+ */
+app.post('/completion-callback', async (c) => {
+  const token = c.req.header('X-Engine-Token');
+
+  // Verify the callback is from our engine using the shared API key
+  if (token !== c.env.ENGINE_API_KEY) {
+    logger.warn('Invalid engine callback token');
+    return c.text('Unauthorized', 401);
+  }
+
+  let callback: CompletionCallback;
+  try {
+    callback = await c.req.json();
+  } catch {
+    logger.error('Invalid JSON in completion callback');
+    return c.json({ error: 'Invalid JSON' }, 400);
+  }
+
+  // Process in background
+  c.executionCtx.waitUntil(
+    handleCompletionCallback(callback, c.env).catch((error) => {
+      logger.error('Error processing completion callback', {
         error: error instanceof Error ? error.message : String(error),
       });
     })

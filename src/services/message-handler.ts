@@ -90,20 +90,14 @@ function isMessageTooOld(timestamp: number, cutoffSeconds: number): boolean {
 /**
  * Get the completion callback URL.
  */
-function getCompletionCallbackUrl(env: Env): string | undefined {
-  if (!env.GATEWAY_PUBLIC_URL) {
-    return undefined;
-  }
+function getCompletionCallbackUrl(env: Env): string {
   return `${env.GATEWAY_PUBLIC_URL.replace(/\/$/, '')}/completion-callback`;
 }
 
 /**
- * Get the progress callback URL if configured.
+ * Get the progress callback URL.
  */
-function getProgressCallbackUrl(env: Env): string | undefined {
-  if (!env.GATEWAY_PUBLIC_URL) {
-    return undefined;
-  }
+function getProgressCallbackUrl(env: Env): string {
   return `${env.GATEWAY_PUBLIC_URL.replace(/\/$/, '')}/progress-callback`;
 }
 
@@ -166,24 +160,13 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
 
   if (!(await validateMessage(message, env))) return;
 
-  const completionCallbackUrl = getCompletionCallbackUrl(env);
-  if (!completionCallbackUrl) {
-    logger.error('GATEWAY_PUBLIC_URL not configured');
-    await sendToWhatsApp(
-      message.userId,
-      'Sorry, the gateway is misconfigured. Please contact support.',
-      env
-    );
-    return;
-  }
-
   await sendTypingIndicator(message.messageId, env);
 
   const result = await sendToEngine(
     message.userId,
     message.text,
     env,
-    completionCallbackUrl,
+    getCompletionCallbackUrl(env),
     getProgressCallbackUrl(env)
   );
 
@@ -215,6 +198,39 @@ export async function sendResponses(userId: string, responses: string[], env: En
       await sendToWhatsApp(userId, chunk, env);
     }
   }
+}
+
+function isNonEmptyString(value: unknown): boolean {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isStringArray(value: unknown): boolean {
+  return Array.isArray(value) && value.every((r: unknown) => typeof r === 'string');
+}
+
+/**
+ * Validate a completion callback payload has the required shape.
+ * Returns an error string if invalid, null if valid.
+ */
+export function validateCompletionCallback(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return 'Payload must be an object';
+  }
+
+  const p = payload as Record<string, unknown>;
+
+  if (!isNonEmptyString(p.message_id)) return 'Missing or invalid message_id';
+  if (!isNonEmptyString(p.user_id)) return 'Missing or invalid user_id';
+
+  if (p.status !== 'completed' && p.status !== 'error') {
+    return 'Invalid status (must be "completed" or "error")';
+  }
+
+  if (p.status === 'completed' && !isStringArray(p.responses)) {
+    return 'Completed callback must include responses as string[]';
+  }
+
+  return null;
 }
 
 /**

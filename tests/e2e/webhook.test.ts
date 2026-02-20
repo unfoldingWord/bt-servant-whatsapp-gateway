@@ -251,6 +251,92 @@ describe('webhook routes', () => {
 
       expect(response.status).toBe(400);
     });
+
+    it('should reject callback missing user_id', async () => {
+      const response = await SELF.fetch('http://localhost/completion-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Engine-Token': env.ENGINE_API_KEY,
+        },
+        body: JSON.stringify({
+          message_id: 'msg-123',
+          status: 'completed',
+          responses: ['Hello!'],
+        }),
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject callback missing message_id', async () => {
+      const response = await SELF.fetch('http://localhost/completion-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Engine-Token': env.ENGINE_API_KEY,
+        },
+        body: JSON.stringify({
+          user_id: 'test',
+          status: 'completed',
+          responses: ['Hello!'],
+        }),
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject callback with invalid status', async () => {
+      const response = await SELF.fetch('http://localhost/completion-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Engine-Token': env.ENGINE_API_KEY,
+        },
+        body: JSON.stringify({
+          message_id: 'msg-123',
+          user_id: 'test',
+          status: 'unknown',
+        }),
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject completed callback with non-array responses', async () => {
+      const response = await SELF.fetch('http://localhost/completion-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Engine-Token': env.ENGINE_API_KEY,
+        },
+        body: JSON.stringify({
+          message_id: 'msg-123',
+          user_id: 'test',
+          status: 'completed',
+          responses: 'not an array',
+        }),
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject completed callback with missing responses', async () => {
+      const response = await SELF.fetch('http://localhost/completion-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Engine-Token': env.ENGINE_API_KEY,
+        },
+        body: JSON.stringify({
+          message_id: 'msg-123',
+          user_id: 'test',
+          status: 'completed',
+        }),
+      });
+
+      expect(response.status).toBe(400);
+    });
   });
 
   describe('POST /progress-callback', () => {

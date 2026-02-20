@@ -16,6 +16,7 @@ import {
   handleWebhook,
   handleCompletionCallback,
   handleProgressCallback,
+  validateCompletionCallback,
 } from './services/message-handler';
 import { logger } from './utils/logger';
 
@@ -106,13 +107,22 @@ app.post('/completion-callback', async (c) => {
     return c.text('Unauthorized', 401);
   }
 
-  let callback: CompletionCallback;
+  let body: unknown;
   try {
-    callback = await c.req.json();
+    body = await c.req.json();
   } catch {
     logger.error('Invalid JSON in completion callback');
     return c.json({ error: 'Invalid JSON' }, 400);
   }
+
+  // Validate payload schema before dispatching to background
+  const validationError = validateCompletionCallback(body);
+  if (validationError) {
+    logger.error('Invalid completion callback payload', { error: validationError });
+    return c.json({ error: validationError }, 400);
+  }
+
+  const callback = body as CompletionCallback;
 
   // Process in background
   c.executionCtx.waitUntil(

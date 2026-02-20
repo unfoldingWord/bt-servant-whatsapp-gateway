@@ -8,7 +8,7 @@ enabled = true
 head_sampling_rate = 1
 
 [vars]
-ENVIRONMENT = "development"
+ENVIRONMENT = "production"
 ENGINE_BASE_URL = "https://api.btservant.ai"
 ENGINE_ORG = "unfoldingWord"
 CHUNK_SIZE = "1500"
@@ -22,4 +22,25 @@ FACEBOOK_USER_AGENT = "facebookexternalua"
 # META_PHONE_NUMBER_ID
 # META_APP_SECRET
 # ENGINE_API_KEY
-# GATEWAY_PUBLIC_URL (optional, for progress callbacks)
+# GATEWAY_PUBLIC_URL
+
+# ──── Staging environment ────
+[env.staging]
+name = "bt-servant-whatsapp-gateway-staging"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+ENGINE_BASE_URL = "https://bt-servant-worker-staging.unfoldingword.workers.dev"
+ENGINE_ORG = "unfoldingWord"
+CHUNK_SIZE = "1500"
+MESSAGE_AGE_CUTOFF_SECONDS = "3600"
+PROGRESS_THROTTLE_SECONDS = "3.0"
+FACEBOOK_USER_AGENT = "facebookexternalua"
+
+# Staging secrets (set via `wrangler secret put --env staging`):
+# META_VERIFY_TOKEN
+# META_WHATSAPP_TOKEN
+# META_PHONE_NUMBER_ID
+# META_APP_SECRET
+# ENGINE_API_KEY
+# GATEWAY_PUBLIC_URL

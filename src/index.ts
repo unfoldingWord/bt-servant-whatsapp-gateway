@@ -22,9 +22,21 @@ import { logger } from './utils/logger';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// Health check endpoints
+// Health check endpoints (always available, even if misconfigured)
 app.get('/health', (c) => c.json({ status: 'healthy' }));
 app.get('/', (c) => c.json({ service: 'whatsapp-gateway', status: 'running' }));
+
+// Runtime env validation for operational routes
+app.use('/*', async (c, next) => {
+  if (c.req.path === '/' || c.req.path === '/health') {
+    return next();
+  }
+  if (!c.env.GATEWAY_PUBLIC_URL) {
+    logger.error('GATEWAY_PUBLIC_URL is not configured');
+    return c.json({ error: 'Service misconfigured' }, 503);
+  }
+  return next();
+});
 
 /**
  * Webhook verification (GET).
@@ -123,6 +135,16 @@ app.post('/completion-callback', async (c) => {
   }
 
   const callback = body as CompletionCallback;
+
+  // Idempotency: skip duplicate callbacks for the same message_id
+  const cacheKey = `https://idempotency/completion/${callback.message_id}`;
+  const cache = caches.default;
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    logger.info('Duplicate completion callback, skipping', { messageId: callback.message_id });
+    return c.text('OK', 200);
+  }
+  await cache.put(cacheKey, new Response(null, { headers: { 'Cache-Control': 'max-age=3600' } }));
 
   // Process in background
   c.executionCtx.waitUntil(

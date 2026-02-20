@@ -337,6 +337,35 @@ describe('webhook routes', () => {
 
       expect(response.status).toBe(400);
     });
+
+    it('should deduplicate callback with same message_id', async () => {
+      const payload = JSON.stringify({
+        message_id: 'msg-dedup-test',
+        user_id: 'test',
+        status: 'completed',
+        responses: ['Hello!'],
+      });
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Engine-Token': env.ENGINE_API_KEY,
+      };
+
+      // First call should be accepted
+      const first = await SELF.fetch('http://localhost/completion-callback', {
+        method: 'POST',
+        headers,
+        body: payload,
+      });
+      expect(first.status).toBe(200);
+
+      // Second call with same message_id should also return 200 (idempotent)
+      const second = await SELF.fetch('http://localhost/completion-callback', {
+        method: 'POST',
+        headers,
+        body: payload,
+      });
+      expect(second.status).toBe(200);
+    });
   });
 
   describe('POST /progress-callback', () => {

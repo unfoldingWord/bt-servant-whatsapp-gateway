@@ -126,10 +126,7 @@ export async function handleWebhook(payload: WebhookPayload, env: Env): Promise<
 /**
  * Validate an incoming message. Returns the message if valid, undefined if it should be skipped.
  */
-async function validateMessage(
-  message: IncomingMessage,
-  env: Env
-): Promise<boolean> {
+async function validateMessage(message: IncomingMessage, env: Env): Promise<boolean> {
   const cutoffSeconds = parseInt(env.MESSAGE_AGE_CUTOFF_SECONDS, 10);
 
   if (!isSupportedType(message.messageType)) {
@@ -209,11 +206,7 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
 /**
  * Send response(s) back to the user.
  */
-export async function sendResponses(
-  userId: string,
-  responses: string[],
-  env: Env
-): Promise<void> {
+export async function sendResponses(userId: string, responses: string[], env: Env): Promise<void> {
   const chunkSize = parseInt(env.CHUNK_SIZE, 10);
 
   for (const text of responses) {

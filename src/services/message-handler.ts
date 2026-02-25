@@ -88,9 +88,13 @@ function isMessageTooOld(timestamp: number, cutoffSeconds: number): boolean {
 }
 
 /**
- * Get the progress callback URL.
+ * Get the progress callback URL, or undefined if GATEWAY_PUBLIC_URL is not configured.
  */
-function getProgressCallbackUrl(env: Env): string {
+function getProgressCallbackUrl(env: Env): string | undefined {
+  if (!env.GATEWAY_PUBLIC_URL) {
+    logger.warn('GATEWAY_PUBLIC_URL is not configured; progress callbacks disabled');
+    return undefined;
+  }
   return `${env.GATEWAY_PUBLIC_URL.replace(/\/$/, '')}/progress-callback`;
 }
 
@@ -203,6 +207,20 @@ function isNonEmptyString(value: unknown): boolean {
 const VALID_CALLBACK_TYPES = ['status', 'progress', 'complete', 'error'];
 
 /**
+ * Validate type-specific required fields on a callback payload.
+ * Returns an error string if invalid, null if valid.
+ */
+function validateCallbackFields(type: string, p: Record<string, unknown>): string | null {
+  if ((type === 'progress' || type === 'complete') && !isNonEmptyString(p.text)) {
+    return `Missing or invalid text for ${type} callback`;
+  }
+  if (type === 'error' && !isNonEmptyString(p.error)) {
+    return 'Missing or invalid error for error callback';
+  }
+  return null;
+}
+
+/**
  * Validate an engine callback payload has the required shape.
  * Returns an error string if invalid, null if valid.
  */
@@ -219,7 +237,7 @@ export function validateEngineCallback(payload: unknown): string | null {
   if (!isNonEmptyString(p.user_id)) return 'Missing or invalid user_id';
   if (!isNonEmptyString(p.message_key)) return 'Missing or invalid message_key';
 
-  return null;
+  return validateCallbackFields(p.type as string, p);
 }
 
 /**

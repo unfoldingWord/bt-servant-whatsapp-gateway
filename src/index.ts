@@ -25,18 +25,6 @@ const app = new Hono<{ Bindings: Env }>();
 app.get('/health', (c) => c.json({ status: 'healthy' }));
 app.get('/', (c) => c.json({ service: 'whatsapp-gateway', status: 'running' }));
 
-// Runtime env validation for operational routes
-app.use('/*', async (c, next) => {
-  if (c.req.path === '/' || c.req.path === '/health') {
-    return next();
-  }
-  if (!c.env.GATEWAY_PUBLIC_URL) {
-    logger.error('GATEWAY_PUBLIC_URL is not configured');
-    return c.json({ error: 'Service misconfigured' }, 503);
-  }
-  return next();
-});
-
 /**
  * Webhook verification (GET).
  *
@@ -105,6 +93,12 @@ app.post('/meta-whatsapp', async (c) => {
 
 /**
  * Handle a 'complete' callback with idempotency deduplication.
+ *
+ * Note: cache.match() + cache.put() is not atomic, so concurrent duplicate
+ * callbacks could theoretically both process. This is acceptable because the
+ * worker's UserQueue Durable Object serializes message processing per-user,
+ * making true concurrent duplicates extremely unlikely. The cache-based dedup
+ * is a best-effort guard against Meta/engine retries, not a linearizable lock.
  */
 async function handleCompleteWithDedup(
   callback: EngineCallback,

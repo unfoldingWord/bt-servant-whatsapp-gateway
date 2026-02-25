@@ -26,7 +26,7 @@ export async function sendMessage(
   userId: string,
   message: string,
   env: Env,
-  callbackUrl: string,
+  messageKey: string,
   progressCallbackUrl?: string
 ): Promise<QueuedResponse | null> {
   const url = `${env.ENGINE_BASE_URL}/api/v1/message`;
@@ -34,14 +34,15 @@ export async function sendMessage(
   const payload: MessageRequest = {
     client_id: CLIENT_ID,
     user_id: userId,
-    org_id: env.ENGINE_ORG,
+    org: env.ENGINE_ORG,
     message,
     message_type: 'text',
-    callback_url: callbackUrl,
+    message_key: messageKey,
   };
 
   if (progressCallbackUrl) {
     payload.progress_callback_url = progressCallbackUrl;
+    payload.progress_mode = 'iteration';
     payload.progress_throttle_seconds = parseFloat(env.PROGRESS_THROTTLE_SECONDS);
   }
 

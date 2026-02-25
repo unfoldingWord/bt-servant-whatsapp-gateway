@@ -10,7 +10,7 @@ import type {
   Contact,
   WebhookPayload,
 } from '../types/meta';
-import type { CompletionCallback, ProgressCallback } from '../types/engine';
+import type { EngineCallback } from '../types/engine';
 import { sendTextMessage as sendToWhatsApp, sendTypingIndicator } from './meta-api/client';
 import { sendMessage as sendToEngine } from './engine-client';
 import { chunkMessage } from './chunking';
@@ -88,13 +88,6 @@ function isMessageTooOld(timestamp: number, cutoffSeconds: number): boolean {
 }
 
 /**
- * Get the completion callback URL.
- */
-function getCompletionCallbackUrl(env: Env): string {
-  return `${env.GATEWAY_PUBLIC_URL.replace(/\/$/, '')}/completion-callback`;
-}
-
-/**
  * Get the progress callback URL.
  */
 function getProgressCallbackUrl(env: Env): string {
@@ -166,7 +159,7 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
     message.userId,
     message.text,
     env,
-    getCompletionCallbackUrl(env),
+    message.messageId,
     getProgressCallbackUrl(env)
   );
 
@@ -207,51 +200,47 @@ function isNonEmptyString(value: unknown): boolean {
   return typeof value === 'string' && value.length > 0;
 }
 
-function isStringArray(value: unknown): boolean {
-  return Array.isArray(value) && value.every((r: unknown) => typeof r === 'string');
-}
+const VALID_CALLBACK_TYPES = ['status', 'progress', 'complete', 'error'];
 
 /**
- * Validate a completion callback payload has the required shape.
+ * Validate an engine callback payload has the required shape.
  * Returns an error string if invalid, null if valid.
  */
-export function validateCompletionCallback(payload: unknown): string | null {
+export function validateEngineCallback(payload: unknown): string | null {
   if (typeof payload !== 'object' || payload === null) {
     return 'Payload must be an object';
   }
 
   const p = payload as Record<string, unknown>;
 
-  if (!isNonEmptyString(p.message_id)) return 'Missing or invalid message_id';
+  if (!isNonEmptyString(p.type) || !VALID_CALLBACK_TYPES.includes(p.type as string)) {
+    return 'Missing or invalid type';
+  }
   if (!isNonEmptyString(p.user_id)) return 'Missing or invalid user_id';
-
-  if (p.status !== 'completed' && p.status !== 'error') {
-    return 'Invalid status (must be "completed" or "error")';
-  }
-
-  if (p.status === 'completed' && !isStringArray(p.responses)) {
-    return 'Completed callback must include responses as string[]';
-  }
+  if (!isNonEmptyString(p.message_key)) return 'Missing or invalid message_key';
 
   return null;
 }
 
 /**
- * Handle a completion callback from the engine.
+ * Handle an engine callback, dispatching by type.
  */
-export async function handleCompletionCallback(
-  callback: CompletionCallback,
-  env: Env
-): Promise<void> {
-  logger.info('Completion callback received', {
-    messageId: callback.message_id,
+export async function handleEngineCallback(callback: EngineCallback, env: Env): Promise<void> {
+  logger.info('Engine callback received', {
+    type: callback.type,
     userId: callback.user_id.slice(0, 8) + '...',
-    status: callback.status,
+    messageKey: callback.message_key,
   });
 
-  if (callback.status === 'completed' && callback.responses) {
-    await sendResponses(callback.user_id, callback.responses, env);
-  } else if (callback.status === 'error') {
+  if (callback.type === 'progress') {
+    if (callback.text) {
+      await sendToWhatsApp(callback.user_id, callback.text, env);
+    }
+  } else if (callback.type === 'complete') {
+    if (callback.text) {
+      await sendResponses(callback.user_id, [callback.text], env);
+    }
+  } else if (callback.type === 'error') {
     const errorMsg = callback.error ?? 'Unknown error';
     logger.error('Engine reported error', { error: errorMsg });
     const sent = await sendToWhatsApp(
@@ -262,35 +251,7 @@ export async function handleCompletionCallback(
     if (!sent) {
       throw new Error(`Failed to send error message to ${callback.user_id.slice(0, 8)}...`);
     }
+  } else {
+    logger.info('Status callback', { message: callback.message });
   }
-}
-
-/**
- * Validate a progress callback payload has the required shape.
- * Returns an error string if invalid, null if valid.
- */
-export function validateProgressCallback(payload: unknown): string | null {
-  if (typeof payload !== 'object' || payload === null) {
-    return 'Payload must be an object';
-  }
-
-  const p = payload as Record<string, unknown>;
-
-  if (!isNonEmptyString(p.user_id)) return 'Missing or invalid user_id';
-  if (!isNonEmptyString(p.message_key)) return 'Missing or invalid message_key';
-  if (typeof p.text !== 'string') return 'Missing or invalid text';
-
-  return null;
-}
-
-/**
- * Handle a progress callback from the engine.
- */
-export async function handleProgressCallback(callback: ProgressCallback, env: Env): Promise<void> {
-  logger.info('Progress callback received', {
-    userId: callback.user_id.slice(0, 8) + '...',
-    messageKey: callback.message_key,
-  });
-
-  await sendToWhatsApp(callback.user_id, callback.text, env);
 }

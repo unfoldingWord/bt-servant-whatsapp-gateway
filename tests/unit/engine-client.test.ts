@@ -44,12 +44,7 @@ describe('engine-client', () => {
         json: async () => mockResponse,
       });
 
-      const result = await sendMessage(
-        'user123',
-        'Hi there',
-        mockEnv,
-        'https://gateway.example.com/completion-callback'
-      );
+      const result = await sendMessage('user123', 'Hi there', mockEnv, 'wamid.abc123');
 
       expect(result).toEqual(mockResponse);
       expect(fetchMock).toHaveBeenCalledWith(
@@ -63,16 +58,16 @@ describe('engine-client', () => {
           body: JSON.stringify({
             client_id: 'whatsapp',
             user_id: 'user123',
-            org_id: 'test-org',
+            org: 'test-org',
             message: 'Hi there',
             message_type: 'text',
-            callback_url: 'https://gateway.example.com/completion-callback',
+            message_key: 'wamid.abc123',
           }),
         })
       );
     });
 
-    it('should include progress callback when url provided', async () => {
+    it('should include progress callback and mode when url provided', async () => {
       const mockResponse = {
         message_id: 'msg-456',
         queue_position: 1,
@@ -87,7 +82,7 @@ describe('engine-client', () => {
         'user123',
         'Hi there',
         mockEnv,
-        'https://gateway.example.com/completion-callback',
+        'wamid.abc123',
         'https://gateway.example.com/progress-callback'
       );
 
@@ -97,11 +92,12 @@ describe('engine-client', () => {
           body: JSON.stringify({
             client_id: 'whatsapp',
             user_id: 'user123',
-            org_id: 'test-org',
+            org: 'test-org',
             message: 'Hi there',
             message_type: 'text',
-            callback_url: 'https://gateway.example.com/completion-callback',
+            message_key: 'wamid.abc123',
             progress_callback_url: 'https://gateway.example.com/progress-callback',
+            progress_mode: 'iteration',
             progress_throttle_seconds: 3.0,
           }),
         })
@@ -119,12 +115,7 @@ describe('engine-client', () => {
         json: async () => mockResponse,
       });
 
-      await sendMessage(
-        'user123',
-        'Hi there',
-        mockEnv,
-        'https://gateway.example.com/completion-callback'
-      );
+      await sendMessage('user123', 'Hi there', mockEnv, 'wamid.abc123');
 
       expect(fetchMock).toHaveBeenCalledWith(
         'http://localhost:8787/api/v1/message',
@@ -132,10 +123,10 @@ describe('engine-client', () => {
           body: JSON.stringify({
             client_id: 'whatsapp',
             user_id: 'user123',
-            org_id: 'test-org',
+            org: 'test-org',
             message: 'Hi there',
             message_type: 'text',
-            callback_url: 'https://gateway.example.com/completion-callback',
+            message_key: 'wamid.abc123',
           }),
         })
       );
@@ -148,12 +139,7 @@ describe('engine-client', () => {
         text: async () => 'Internal Server Error',
       });
 
-      const result = await sendMessage(
-        'user123',
-        'Hi there',
-        mockEnv,
-        'https://gateway.example.com/completion-callback'
-      );
+      const result = await sendMessage('user123', 'Hi there', mockEnv, 'wamid.abc123');
 
       expect(result).toBeNull();
     });
@@ -161,12 +147,7 @@ describe('engine-client', () => {
     it('should return null on network error', async () => {
       fetchMock.mockRejectedValueOnce(new Error('Network error'));
 
-      const result = await sendMessage(
-        'user123',
-        'Hi there',
-        mockEnv,
-        'https://gateway.example.com/completion-callback'
-      );
+      const result = await sendMessage('user123', 'Hi there', mockEnv, 'wamid.abc123');
 
       expect(result).toBeNull();
     });

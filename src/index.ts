@@ -10,14 +10,12 @@
 import { Hono } from 'hono';
 import type { Env } from './config/types';
 import type { WebhookPayload } from './types/meta';
-import type { CompletionCallback, ProgressCallback } from './types/engine';
+import type { EngineCallback } from './types/engine';
 import { verifyFacebookSignature } from './services/meta-api/signature';
 import {
   handleWebhook,
-  handleCompletionCallback,
-  handleProgressCallback,
-  validateCompletionCallback,
-  validateProgressCallback,
+  handleEngineCallback,
+  validateEngineCallback,
 } from './services/message-handler';
 import { logger } from './utils/logger';
 
@@ -106,73 +104,44 @@ app.post('/meta-whatsapp', async (c) => {
 });
 
 /**
- * Completion callback from engine.
- *
- * The engine POSTs here when a user's queued message has been fully processed.
- * The response is forwarded to the user via WhatsApp.
+ * Handle a 'complete' callback with idempotency deduplication.
  */
-app.post('/completion-callback', async (c) => {
-  const token = c.req.header('X-Engine-Token');
-
-  // Verify the callback is from our engine using the shared API key
-  if (token !== c.env.ENGINE_API_KEY) {
-    logger.warn('Invalid engine callback token');
-    return c.text('Unauthorized', 401);
-  }
-
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    logger.error('Invalid JSON in completion callback');
-    return c.json({ error: 'Invalid JSON' }, 400);
-  }
-
-  // Validate payload schema before dispatching to background
-  const validationError = validateCompletionCallback(body);
-  if (validationError) {
-    logger.error('Invalid completion callback payload', { error: validationError });
-    return c.json({ error: validationError }, 400);
-  }
-
-  const callback = body as CompletionCallback;
-
-  // Idempotency: skip duplicate callbacks for the same message_id
-  const cacheKey = `https://idempotency/completion/${callback.message_id}`;
+async function handleCompleteWithDedup(
+  callback: EngineCallback,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<Response> {
+  const cacheKey = `https://idempotency/complete/${callback.message_key}`;
   const cache = caches.default;
   const cached = await cache.match(cacheKey);
   if (cached) {
-    logger.info('Duplicate completion callback, skipping', { messageId: callback.message_id });
-    return c.text('OK', 200, { 'X-Deduplicated': 'true' });
+    logger.info('Duplicate complete callback, skipping', { messageKey: callback.message_key });
+    return new Response('OK', { status: 200, headers: { 'X-Deduplicated': 'true' } });
   }
 
-  // Write marker optimistically; delete on failure so retries can succeed
   await cache.put(cacheKey, new Response(null, { headers: { 'Cache-Control': 'max-age=3600' } }));
 
-  // Process in background
-  c.executionCtx.waitUntil(
-    handleCompletionCallback(callback, c.env).catch(async (error) => {
-      logger.error('Error processing completion callback', {
+  ctx.waitUntil(
+    handleEngineCallback(callback, env).catch(async (error) => {
+      logger.error('Error processing complete callback', {
         error: error instanceof Error ? error.message : String(error),
       });
       await cache.delete(cacheKey);
     })
   );
 
-  return c.text('OK', 200);
-});
+  return new Response('OK', { status: 200 });
+}
 
 /**
- * Progress callback from engine.
+ * Engine callback handler (POST).
  *
- * The engine POSTs here when a user's request is being processed and
- * a status update is available. The progress text is forwarded to the
- * user via WhatsApp.
+ * The engine POSTs here for all callback types: status, progress, complete, error.
+ * Dispatches by type and applies deduplication for 'complete' callbacks.
  */
 app.post('/progress-callback', async (c) => {
   const token = c.req.header('X-Engine-Token');
 
-  // Verify the callback is from our engine using the shared API key
   if (token !== c.env.ENGINE_API_KEY) {
     logger.warn('Invalid engine callback token');
     return c.text('Unauthorized', 401);
@@ -182,23 +151,25 @@ app.post('/progress-callback', async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    logger.error('Invalid JSON in progress callback');
+    logger.error('Invalid JSON in engine callback');
     return c.json({ error: 'Invalid JSON' }, 400);
   }
 
-  // Validate payload schema before dispatching to background
-  const validationError = validateProgressCallback(body);
+  const validationError = validateEngineCallback(body);
   if (validationError) {
-    logger.error('Invalid progress callback payload', { error: validationError });
+    logger.error('Invalid engine callback payload', { error: validationError });
     return c.json({ error: validationError }, 400);
   }
 
-  const callback = body as ProgressCallback;
+  const callback = body as EngineCallback;
 
-  // Process in background
+  if (callback.type === 'complete') {
+    return handleCompleteWithDedup(callback, c.env, c.executionCtx);
+  }
+
   c.executionCtx.waitUntil(
-    handleProgressCallback(callback, c.env).catch((error) => {
-      logger.error('Error processing progress callback', {
+    handleEngineCallback(callback, c.env).catch((error) => {
+      logger.error('Error processing engine callback', {
         error: error instanceof Error ? error.message : String(error),
       });
     })

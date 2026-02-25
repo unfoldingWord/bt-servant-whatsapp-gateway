@@ -45,10 +45,7 @@ const MISCONFIG_COOLDOWN_MS = 300_000; // 5 minutes
  * Deduplicates by sender so Meta retries don't spam the user.
  * Returns the Promise to pass to waitUntil, or undefined if skipped.
  */
-function notifyMisconfigOnce(
-  payload: WebhookPayload,
-  env: Env
-): Promise<boolean> | undefined {
+function notifyMisconfigOnce(payload: WebhookPayload, env: Env): Promise<boolean> | undefined {
   const sender = extractFirstSender(payload);
   if (!sender) return undefined;
 

@@ -50,6 +50,12 @@ function notifyMisconfigOnce(payload: WebhookPayload, env: Env): Promise<boolean
   if (!sender) return undefined;
 
   const now = Date.now();
+
+  // Sweep expired entries to bound map size
+  for (const [key, expiresAt] of misconfigNotified) {
+    if (expiresAt < now) misconfigNotified.delete(key);
+  }
+
   const notifiedUntil = misconfigNotified.get(sender);
   if (notifiedUntil !== undefined && notifiedUntil > now) return undefined;
 

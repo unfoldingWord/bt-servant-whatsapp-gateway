@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { env, fetchMock, SELF } from 'cloudflare:test';
+import { env, createExecutionContext, fetchMock, SELF } from 'cloudflare:test';
+import app from '../../src/index';
 import { arrayBufferToHex } from '../../src/utils/crypto';
 
 describe('webhook routes', () => {
@@ -157,6 +158,66 @@ describe('webhook routes', () => {
       });
 
       expect(response.status).toBe(400);
+    });
+
+    it('should return 503 when GATEWAY_PUBLIC_URL is missing', async () => {
+      const body = JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            id: '123',
+            changes: [
+              {
+                field: 'messages',
+                value: {
+                  messaging_product: 'whatsapp',
+                  metadata: { display_phone_number: '+1234', phone_number_id: '123456789' },
+                  contacts: [{ wa_id: '5551234567' }],
+                  messages: [
+                    {
+                      id: 'wamid.misconfig-test',
+                      from: '5551234567',
+                      timestamp: String(Math.floor(Date.now() / 1000)),
+                      type: 'text',
+                      text: { body: 'hello' },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const signature = await computeSignature(body, env.META_APP_SECRET);
+
+      fetchMock.activate();
+      fetchMock.disableNetConnect();
+      fetchMock
+        .get('https://graph.facebook.com')
+        .intercept({ path: /.*/, method: 'POST' })
+        .reply(200, { messaging_product: 'whatsapp', messages: [{ id: 'wamid.mock' }] })
+        .persist();
+
+      try {
+        const misconfiguredEnv = { ...env, GATEWAY_PUBLIC_URL: '' };
+        const ctx = createExecutionContext();
+        const request = new Request('http://localhost/meta-whatsapp', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'facebookexternalua',
+            'X-Hub-Signature-256': signature,
+          },
+          body,
+        });
+
+        const response = await app.fetch(request, misconfiguredEnv, ctx);
+
+        expect(response.status).toBe(503);
+        expect(await response.text()).toBe('Service misconfigured');
+      } finally {
+        fetchMock.deactivate();
+      }
     });
   });
 

@@ -92,35 +92,39 @@ app.post('/meta-whatsapp', async (c) => {
 });
 
 /**
- * Handle a 'complete' callback with idempotency deduplication.
+ * In-memory set for atomic complete-callback deduplication.
  *
- * Note: cache.match() + cache.put() is not atomic, so concurrent duplicate
- * callbacks could theoretically both process. This is acceptable because the
- * worker's UserQueue Durable Object serializes message processing per-user,
- * making true concurrent duplicates extremely unlikely. The cache-based dedup
- * is a best-effort guard against Meta/engine retries, not a linearizable lock.
+ * Because JS is single-threaded, the synchronous has()+add() below is atomic
+ * within an isolate — no concurrent request can interleave between check and
+ * mark. Cross-isolate dedup is handled by the worker's UserQueue DO which
+ * serializes processing per-user. Entries expire via setTimeout so the set
+ * doesn't grow unbounded within long-lived isolates.
  */
-async function handleCompleteWithDedup(
+const completedKeys = new Set<string>();
+const DEDUP_TTL_MS = 3_600_000; // 1 hour
+
+function handleCompleteWithDedup(
   callback: EngineCallback,
   env: Env,
   ctx: ExecutionContext
-): Promise<Response> {
-  const cacheKey = `https://idempotency/complete/${callback.message_key}`;
-  const cache = caches.default;
-  const cached = await cache.match(cacheKey);
-  if (cached) {
-    logger.info('Duplicate complete callback, skipping', { messageKey: callback.message_key });
+): Response {
+  const key = callback.message_key;
+
+  if (completedKeys.has(key)) {
+    logger.info('Duplicate complete callback, skipping', { messageKey: key });
     return new Response('OK', { status: 200, headers: { 'X-Deduplicated': 'true' } });
   }
 
-  await cache.put(cacheKey, new Response(null, { headers: { 'Cache-Control': 'max-age=3600' } }));
+  // Atomic within the isolate: synchronous add before any await
+  completedKeys.add(key);
+  setTimeout(() => completedKeys.delete(key), DEDUP_TTL_MS);
 
   ctx.waitUntil(
-    handleEngineCallback(callback, env).catch(async (error) => {
+    handleEngineCallback(callback, env).catch((error) => {
       logger.error('Error processing complete callback', {
         error: error instanceof Error ? error.message : String(error),
       });
-      await cache.delete(cacheKey);
+      completedKeys.delete(key);
     })
   );
 

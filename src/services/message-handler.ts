@@ -88,12 +88,14 @@ function isMessageTooOld(timestamp: number, cutoffSeconds: number): boolean {
 }
 
 /**
- * Get the progress callback URL, or undefined if GATEWAY_PUBLIC_URL is not configured.
+ * Get the progress callback URL.
+ * Throws if GATEWAY_PUBLIC_URL is not configured, because without it the worker
+ * falls back to SSE delivery which this gateway cannot consume — messages would
+ * be processed but never delivered to WhatsApp.
  */
-function getProgressCallbackUrl(env: Env): string | undefined {
+function getProgressCallbackUrl(env: Env): string {
   if (!env.GATEWAY_PUBLIC_URL) {
-    logger.warn('GATEWAY_PUBLIC_URL is not configured; progress callbacks disabled');
-    return undefined;
+    throw new Error('GATEWAY_PUBLIC_URL is required for message delivery');
   }
   return `${env.GATEWAY_PUBLIC_URL.replace(/\/$/, '')}/progress-callback`;
 }

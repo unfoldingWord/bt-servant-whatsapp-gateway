@@ -55,7 +55,7 @@ export async function sendMessage(
 
     if (!response.ok) {
       const errorText = await response.text();
-      logger.error('Engine API error', { status: response.status, error: errorText });
+      logger.error('Engine API error', { url, status: response.status, error: errorText });
       return null;
     }
 

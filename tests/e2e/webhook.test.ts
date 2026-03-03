@@ -1,19 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { env, SELF } from 'cloudflare:test';
+import { env, createExecutionContext, fetchMock, SELF } from 'cloudflare:test';
+import app from '../../src/index';
 import { arrayBufferToHex } from '../../src/utils/crypto';
 
 describe('webhook routes', () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
-
   beforeEach(() => {
-    fetchMock = vi.fn();
-    // Only mock external fetch calls, not internal worker requests
-    // The test framework handles internal routing via SELF
+    vi.resetAllMocks();
   });
 
   afterEach(() => {
-    globalThis.fetch = originalFetch;
     vi.resetAllMocks();
   });
 
@@ -164,18 +159,98 @@ describe('webhook routes', () => {
 
       expect(response.status).toBe(400);
     });
+
+    it('should return 503 when GATEWAY_PUBLIC_URL is missing', async () => {
+      const body = JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            id: '123',
+            changes: [
+              {
+                field: 'messages',
+                value: {
+                  messaging_product: 'whatsapp',
+                  metadata: { display_phone_number: '+1234', phone_number_id: '123456789' },
+                  contacts: [{ wa_id: '5551234567' }],
+                  messages: [
+                    {
+                      id: 'wamid.misconfig-test',
+                      from: '5551234567',
+                      timestamp: String(Math.floor(Date.now() / 1000)),
+                      type: 'text',
+                      text: { body: 'hello' },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const signature = await computeSignature(body, env.META_APP_SECRET);
+
+      fetchMock.activate();
+      fetchMock.disableNetConnect();
+      fetchMock
+        .get('https://graph.facebook.com')
+        .intercept({ path: /.*/, method: 'POST' })
+        .reply(200, { messaging_product: 'whatsapp', messages: [{ id: 'wamid.mock' }] })
+        .persist();
+
+      try {
+        const misconfiguredEnv = { ...env, GATEWAY_PUBLIC_URL: '' };
+        const ctx = createExecutionContext();
+        const request = new Request('http://localhost/meta-whatsapp', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'facebookexternalua',
+            'X-Hub-Signature-256': signature,
+          },
+          body,
+        });
+
+        const response = await app.fetch(request, misconfiguredEnv, ctx);
+
+        expect(response.status).toBe(503);
+        expect(await response.text()).toBe('Service misconfigured');
+      } finally {
+        fetchMock.deactivate();
+      }
+    });
   });
 
   describe('POST /progress-callback', () => {
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Engine-Token': env.ENGINE_API_KEY,
+    };
+
+    beforeEach(() => {
+      fetchMock.activate();
+      fetchMock.disableNetConnect();
+      const metaPool = fetchMock.get('https://graph.facebook.com');
+      metaPool
+        .intercept({ path: /.*/, method: 'POST' })
+        .reply(200, { messaging_product: 'whatsapp', messages: [{ id: 'wamid.mock' }] })
+        .persist();
+    });
+
+    afterEach(() => {
+      fetchMock.deactivate();
+    });
+
     it('should reject without engine token', async () => {
       const response = await SELF.fetch('http://localhost/progress-callback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          type: 'progress',
           user_id: 'test',
           message_key: 'key',
           text: 'Progress',
-          timestamp: Date.now(),
+          timestamp: new Date().toISOString(),
         }),
       });
 
@@ -190,10 +265,11 @@ describe('webhook routes', () => {
           'X-Engine-Token': 'wrong-token',
         },
         body: JSON.stringify({
+          type: 'progress',
           user_id: 'test',
           message_key: 'key',
           text: 'Progress',
-          timestamp: Date.now(),
+          timestamp: new Date().toISOString(),
         }),
       });
 
@@ -203,15 +279,64 @@ describe('webhook routes', () => {
     it('should accept valid progress callback', async () => {
       const response = await SELF.fetch('http://localhost/progress-callback', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Engine-Token': env.ENGINE_API_KEY,
-        },
+        headers,
         body: JSON.stringify({
+          type: 'progress',
           user_id: 'test',
           message_key: 'key',
-          text: 'Progress',
-          timestamp: Date.now(),
+          text: 'Progress update',
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('OK');
+    });
+
+    it('should accept valid complete callback', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'complete',
+          user_id: 'test',
+          message_key: 'complete-test-key',
+          text: 'Final response',
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('OK');
+    });
+
+    it('should accept valid error callback', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'error',
+          user_id: 'test',
+          message_key: 'error-test-key',
+          error: 'Something went wrong',
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('OK');
+    });
+
+    it('should accept valid status callback', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'status',
+          user_id: 'test',
+          message_key: 'status-test-key',
+          message: 'Processing step 2',
+          timestamp: new Date().toISOString(),
         }),
       });
 
@@ -222,14 +347,151 @@ describe('webhook routes', () => {
     it('should reject malformed JSON', async () => {
       const response = await SELF.fetch('http://localhost/progress-callback', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Engine-Token': env.ENGINE_API_KEY,
-        },
+        headers,
         body: 'not valid json',
       });
 
       expect(response.status).toBe(400);
+    });
+
+    it('should reject callback missing type', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          user_id: 'test',
+          message_key: 'key',
+          text: 'Progress',
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject callback with invalid type', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'unknown',
+          user_id: 'test',
+          message_key: 'key',
+          text: 'Progress',
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject callback missing user_id', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'progress',
+          message_key: 'key',
+          text: 'Progress',
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject callback missing message_key', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'progress',
+          user_id: 'test',
+          text: 'Progress',
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject progress callback without text', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'progress',
+          user_id: 'test',
+          message_key: 'key',
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error).toContain('text');
+    });
+
+    it('should reject complete callback without text', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'complete',
+          user_id: 'test',
+          message_key: 'key',
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error).toContain('text');
+    });
+
+    it('should reject error callback without error field', async () => {
+      const response = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'error',
+          user_id: 'test',
+          message_key: 'key',
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error).toContain('error');
+    });
+
+    it('should deduplicate complete callback with same message_key', async () => {
+      const payload = JSON.stringify({
+        type: 'complete',
+        user_id: 'test',
+        message_key: 'dedup-test-key',
+        text: 'Final response',
+        timestamp: new Date().toISOString(),
+      });
+
+      // First call should be accepted and processed (no dedup header)
+      const first = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers,
+        body: payload,
+      });
+      expect(first.status).toBe(200);
+      expect(first.headers.get('X-Deduplicated')).toBeNull();
+
+      // Second call should be idempotent: 200 with dedup header, no re-processing
+      const second = await SELF.fetch('http://localhost/progress-callback', {
+        method: 'POST',
+        headers,
+        body: payload,
+      });
+      expect(second.status).toBe(200);
+      expect(second.headers.get('X-Deduplicated')).toBe('true');
     });
   });
 });

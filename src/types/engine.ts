@@ -2,28 +2,37 @@
  * Types for communicating with the BT Servant Engine API.
  */
 
-/** Request body for the /api/v1/chat endpoint */
-export interface ChatRequest {
+/** Request body for the /api/v1/chat/queue endpoint */
+export interface MessageRequest {
   client_id: string;
   user_id: string;
+  org: string;
   message: string;
   message_type: 'text' | 'audio';
-  message_key?: string;
+  message_key: string;
   progress_callback_url?: string;
+  progress_mode?: 'complete' | 'iteration' | 'periodic' | 'sentence';
   progress_throttle_seconds?: number;
+  audio_base64?: string;
+  audio_format?: string;
 }
 
-/** Response from the /api/v1/chat endpoint */
-export interface ChatResponse {
-  responses: string[];
-  response_language: string;
-  voice_audio_base64: string | null;
+/** Response from the /api/v1/chat/queue endpoint */
+export interface QueuedResponse {
+  message_id: string;
+  queue_position: number;
 }
 
-/** Payload received from engine progress callbacks */
-export interface ProgressCallback {
+/** Callback type discriminator from the engine */
+export type EngineCallbackType = 'status' | 'progress' | 'complete' | 'error';
+
+/** Unified payload received from engine callbacks */
+export interface EngineCallback {
+  type: EngineCallbackType;
   user_id: string;
   message_key: string;
-  text: string;
-  timestamp: number;
+  timestamp: string;
+  text?: string;
+  message?: string;
+  error?: string;
 }

@@ -30,7 +30,7 @@ name = "bt-servant-whatsapp-gateway-staging"
 
 [env.staging.vars]
 ENVIRONMENT = "staging"
-ENGINE_BASE_URL = "https://bt-servant-worker-staging.unfoldingword.workers.dev"
+ENGINE_BASE_URL = "https://staging-api.btservant.ai"
 ENGINE_ORG = "unfoldingWord"
 CHUNK_SIZE = "1500"
 MESSAGE_AGE_CUTOFF_SECONDS = "3600"

@@ -1,15 +1,11 @@
-name: Deploy
+name: Deploy Production
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
     name: Deploy to Production
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

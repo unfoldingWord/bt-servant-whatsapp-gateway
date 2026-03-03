@@ -48,7 +48,7 @@ describe('engine-client', () => {
 
       expect(result).toEqual(mockResponse);
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:8787/api/v1/message',
+        'http://localhost:8787/api/v1/chat/queue',
         expect.objectContaining({
           method: 'POST',
           headers: {
@@ -87,7 +87,7 @@ describe('engine-client', () => {
       );
 
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:8787/api/v1/message',
+        'http://localhost:8787/api/v1/chat/queue',
         expect.objectContaining({
           body: JSON.stringify({
             client_id: 'whatsapp',
@@ -118,7 +118,7 @@ describe('engine-client', () => {
       await sendMessage('user123', 'Hi there', mockEnv, 'wamid.abc123');
 
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:8787/api/v1/message',
+        'http://localhost:8787/api/v1/chat/queue',
         expect.objectContaining({
           body: JSON.stringify({
             client_id: 'whatsapp',

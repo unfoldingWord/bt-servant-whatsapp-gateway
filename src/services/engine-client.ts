@@ -29,7 +29,7 @@ export async function sendMessage(
   messageKey: string,
   progressCallbackUrl?: string
 ): Promise<QueuedResponse | null> {
-  const url = `${env.ENGINE_BASE_URL}/api/v1/message`;
+  const url = `${env.ENGINE_BASE_URL}/api/v1/chat/queue`;
 
   const payload: MessageRequest = {
     client_id: CLIENT_ID,

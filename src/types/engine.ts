@@ -2,7 +2,7 @@
  * Types for communicating with the BT Servant Engine API.
  */
 
-/** Request body for the /api/v1/message endpoint */
+/** Request body for the /api/v1/chat/queue endpoint */
 export interface MessageRequest {
   client_id: string;
   user_id: string;
@@ -17,7 +17,7 @@ export interface MessageRequest {
   audio_format?: string;
 }
 
-/** Response from the /api/v1/message endpoint */
+/** Response from the /api/v1/chat/queue endpoint */
 export interface QueuedResponse {
   message_id: string;
   queue_position: number;

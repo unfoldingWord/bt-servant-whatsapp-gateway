@@ -204,7 +204,8 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
   const options: SendMessageOptions = { progressCallbackUrl: getProgressCallbackUrl(env) };
   if (audio) options.audio = audio;
 
-  const result = await sendToEngine(message.userId, message.text, env, message.messageId, options);
+  const messageText = audio ? '[voice message]' : message.text;
+  const result = await sendToEngine(message.userId, messageText, env, message.messageId, options);
 
   if (!result) {
     logger.error('Failed to queue message with engine');

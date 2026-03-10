@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.wrangler/
+coverage/
+.mypy_cache/
+.import_linter_cache/
+.pytest_cache/
+.claude/
+pnpm-lock.yaml

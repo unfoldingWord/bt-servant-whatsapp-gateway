@@ -4,10 +4,7 @@ import {
   sendAudioById,
   sendAudioMessage,
 } from '../../src/services/meta-api/client';
-import {
-  handleEngineCallback,
-  validateEngineCallback,
-} from '../../src/services/message-handler';
+import { handleEngineCallback, validateEngineCallback } from '../../src/services/message-handler';
 import type { Env } from '../../src/config/types';
 import type { EngineCallback } from '../../src/types/engine';
 

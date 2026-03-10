@@ -142,7 +142,11 @@ export async function sendAudioById(to: string, mediaId: string, env: Env): Prom
  * Send an audio message to a WhatsApp user.
  * Uploads base64 audio to Meta, then sends using the media ID.
  */
-export async function sendAudioMessage(to: string, audioBase64: string, env: Env): Promise<boolean> {
+export async function sendAudioMessage(
+  to: string,
+  audioBase64: string,
+  env: Env
+): Promise<boolean> {
   const mediaId = await uploadAudioMedia(audioBase64, env);
   if (!mediaId) return false;
   return sendAudioById(to, mediaId, env);

@@ -28,6 +28,13 @@ coverage/
 .DS_Store
 Thumbs.db
 
+# Legacy Python caches
+.mypy_cache/
+.import_linter_cache/
+
+# Claude Code
+.claude/
+
 # Cursor
 .cursorignore
 .cursorindexingignore

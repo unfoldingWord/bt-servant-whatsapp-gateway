@@ -80,26 +80,72 @@ export async function sendTypingIndicator(messageId: string, env: Env): Promise<
 }
 
 /**
- * Send an audio message to a WhatsApp user.
- *
- * Note: This requires uploading the audio first and getting a media ID.
- * For now, this is a placeholder - audio responses are not supported
- * since Cloudflare Workers cannot write to temporary files.
+ * Upload base64-encoded audio to Meta's media API.
+ * Returns the media ID on success, null on failure.
  */
-export async function sendAudioMessage(
-  _to: string,
-  _audioBase64: string,
-  _env: Env
-): Promise<boolean> {
-  // Audio messages require:
-  // 1. Decode base64 to bytes
-  // 2. Upload to Meta (multipart form)
-  // 3. Send message with media ID
-  //
-  // This is complex in Workers without file system access.
-  // For now, we fall back to text responses.
-  logger.warn('Audio message sending not implemented in Worker');
-  return false;
+export async function uploadAudioMedia(audioBase64: string, env: Env): Promise<string | null> {
+  const url = `${getBaseUrl()}/${env.META_PHONE_NUMBER_ID}/media`;
+  const bytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
+  const blob = new Blob([bytes], { type: 'audio/mpeg' });
+
+  const form = new FormData();
+  form.append('file', blob, 'audio.mp3');
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', 'audio/mpeg');
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.META_WHATSAPP_TOKEN}` },
+    body: form,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error('Failed to upload audio media', { status: response.status, error: errorText });
+    return null;
+  }
+
+  const result = (await response.json()) as { id?: string };
+  return result.id ?? null;
+}
+
+/**
+ * Send a WhatsApp audio message using an already-uploaded media ID.
+ */
+export async function sendAudioById(to: string, mediaId: string, env: Env): Promise<boolean> {
+  const url = `${getBaseUrl()}/${env.META_PHONE_NUMBER_ID}/messages`;
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'audio',
+    audio: { id: mediaId },
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: getAuthHeaders(env),
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error('Failed to send audio message', { status: response.status, error: errorText });
+    return false;
+  }
+
+  logger.info('Sent audio message to user', { to: to.slice(0, 8) + '...' });
+  return true;
+}
+
+/**
+ * Send an audio message to a WhatsApp user.
+ * Uploads base64 audio to Meta, then sends using the media ID.
+ */
+export async function sendAudioMessage(to: string, audioBase64: string, env: Env): Promise<boolean> {
+  const mediaId = await uploadAudioMedia(audioBase64, env);
+  if (!mediaId) return false;
+  return sendAudioById(to, mediaId, env);
 }
 
 /**

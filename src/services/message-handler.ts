@@ -144,11 +144,19 @@ const MAX_AUDIO_SIZE = 25 * 1024 * 1024;
  * Download audio from Meta, base64-encode it, and return as AudioPayload.
  * Sends an error message to the user and returns undefined on failure.
  */
+/** Chunk size for binary-to-string conversion (avoids call stack limits) */
+const B64_CHUNK = 8192;
+
 async function downloadAndEncodeAudio(
   message: IncomingMessage,
   env: Env
 ): Promise<AudioPayload | undefined> {
-  const buffer = await downloadMedia(message.mediaId!, env);
+  if (!message.mediaId) {
+    logger.error('No mediaId on audio message');
+    return undefined;
+  }
+
+  const buffer = await downloadMedia(message.mediaId, env);
   if (!buffer) {
     logger.error('Failed to download audio', { mediaId: message.mediaId });
     await sendToWhatsApp(message.userId, 'Sorry, I could not download your voice message.', env);
@@ -162,11 +170,11 @@ async function downloadAndEncodeAudio(
   }
 
   const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i] as number);
+  const chunks: string[] = [];
+  for (let i = 0; i < bytes.length; i += B64_CHUNK) {
+    chunks.push(String.fromCharCode(...bytes.subarray(i, i + B64_CHUNK)));
   }
-  const audioBase64 = btoa(binary);
+  const audioBase64 = btoa(chunks.join(''));
 
   return { audioBase64, audioFormat: 'ogg' };
 }

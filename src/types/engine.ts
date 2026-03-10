@@ -35,4 +35,5 @@ export interface EngineCallback {
   text?: string;
   message?: string;
   error?: string;
+  voice_audio_base64?: string;
 }

@@ -19,6 +19,18 @@ function getAuthHeaders(env: Env): Record<string, string> {
   };
 }
 
+/** Optional audio payload to attach to an engine message */
+export interface AudioPayload {
+  audioBase64: string;
+  audioFormat: string;
+}
+
+/** Optional parameters for sendMessage */
+export interface SendMessageOptions {
+  progressCallbackUrl?: string;
+  audio?: AudioPayload;
+}
+
 /**
  * Send a message to the engine for queued processing.
  */
@@ -27,18 +39,24 @@ export async function sendMessage(
   message: string,
   env: Env,
   messageKey: string,
-  progressCallbackUrl?: string
+  options?: SendMessageOptions
 ): Promise<QueuedResponse | null> {
   const url = `${env.ENGINE_BASE_URL}/api/v1/chat/queue`;
+  const { progressCallbackUrl, audio } = options ?? {};
 
   const payload: MessageRequest = {
     client_id: CLIENT_ID,
     user_id: userId,
     org: env.ENGINE_ORG,
     message,
-    message_type: 'text',
+    message_type: audio ? 'audio' : 'text',
     message_key: messageKey,
   };
+
+  if (audio) {
+    payload.audio_base64 = audio.audioBase64;
+    payload.audio_format = audio.audioFormat;
+  }
 
   if (progressCallbackUrl) {
     payload.progress_callback_url = progressCallbackUrl;

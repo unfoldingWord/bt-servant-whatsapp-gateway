@@ -11,8 +11,14 @@ import type {
   WebhookPayload,
 } from '../types/meta';
 import type { EngineCallback } from '../types/engine';
-import { sendTextMessage as sendToWhatsApp, sendTypingIndicator } from './meta-api/client';
+import {
+  sendTextMessage as sendToWhatsApp,
+  sendTypingIndicator,
+  sendAudioMessage,
+  downloadMedia,
+} from './meta-api/client';
 import { sendMessage as sendToEngine } from './engine-client';
+import type { AudioPayload, SendMessageOptions } from './engine-client';
 import { chunkMessage } from './chunking';
 import { logger } from '../utils/logger';
 
@@ -128,16 +134,41 @@ async function validateMessage(message: IncomingMessage, env: Env): Promise<bool
     return false;
   }
 
-  if (message.messageType === 'audio') {
-    await sendToWhatsApp(
-      message.userId,
-      'Voice messages are temporarily unavailable. Please send a text message.',
-      env
-    );
-    return false;
+  return true;
+}
+
+/** Maximum audio file size in bytes (25 MB) */
+const MAX_AUDIO_SIZE = 25 * 1024 * 1024;
+
+/**
+ * Download audio from Meta, base64-encode it, and return as AudioPayload.
+ * Sends an error message to the user and returns undefined on failure.
+ */
+async function downloadAndEncodeAudio(
+  message: IncomingMessage,
+  env: Env
+): Promise<AudioPayload | undefined> {
+  const buffer = await downloadMedia(message.mediaId!, env);
+  if (!buffer) {
+    logger.error('Failed to download audio', { mediaId: message.mediaId });
+    await sendToWhatsApp(message.userId, 'Sorry, I could not download your voice message.', env);
+    return undefined;
   }
 
-  return true;
+  if (buffer.byteLength > MAX_AUDIO_SIZE) {
+    logger.warn('Audio too large', { size: buffer.byteLength });
+    await sendToWhatsApp(message.userId, 'Your voice message is too large (max 25 MB).', env);
+    return undefined;
+  }
+
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i] as number);
+  }
+  const audioBase64 = btoa(binary);
+
+  return { audioBase64, audioFormat: 'ogg' };
 }
 
 /**
@@ -156,13 +187,16 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
 
   await sendTypingIndicator(message.messageId, env);
 
-  const result = await sendToEngine(
-    message.userId,
-    message.text,
-    env,
-    message.messageId,
-    getProgressCallbackUrl(env)
-  );
+  let audio: AudioPayload | undefined;
+  if (message.messageType === 'audio' && message.mediaId) {
+    audio = await downloadAndEncodeAudio(message, env);
+    if (!audio) return;
+  }
+
+  const options: SendMessageOptions = { progressCallbackUrl: getProgressCallbackUrl(env) };
+  if (audio) options.audio = audio;
+
+  const result = await sendToEngine(message.userId, message.text, env, message.messageId, options);
 
   if (!result) {
     logger.error('Failed to queue message with engine');
@@ -208,8 +242,11 @@ const VALID_CALLBACK_TYPES = ['status', 'progress', 'complete', 'error'];
  * Returns an error string if invalid, null if valid.
  */
 function validateCallbackFields(type: string, p: Record<string, unknown>): string | null {
-  if ((type === 'progress' || type === 'complete') && !isNonEmptyString(p.text)) {
-    return `Missing or invalid text for ${type} callback`;
+  if (type === 'progress' && !isNonEmptyString(p.text)) {
+    return 'Missing or invalid text for progress callback';
+  }
+  if (type === 'complete' && !isNonEmptyString(p.text) && !isNonEmptyString(p.voice_audio_base64)) {
+    return 'Missing text or voice_audio_base64 for complete callback';
   }
   if (type === 'error' && !isNonEmptyString(p.error)) {
     return 'Missing or invalid error for error callback';
@@ -252,6 +289,12 @@ export async function handleEngineCallback(callback: EngineCallback, env: Env): 
       await sendToWhatsApp(callback.user_id, callback.text, env);
     }
   } else if (callback.type === 'complete') {
+    if (callback.voice_audio_base64) {
+      const audioSent = await sendAudioMessage(callback.user_id, callback.voice_audio_base64, env);
+      if (!audioSent) {
+        logger.warn('Failed to send audio response, falling back to text only');
+      }
+    }
     if (callback.text) {
       await sendResponses(callback.user_id, [callback.text], env);
     }

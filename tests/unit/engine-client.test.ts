@@ -78,13 +78,9 @@ describe('engine-client', () => {
         json: async () => mockResponse,
       });
 
-      await sendMessage(
-        'user123',
-        'Hi there',
-        mockEnv,
-        'wamid.abc123',
-        'https://gateway.example.com/progress-callback'
-      );
+      await sendMessage('user123', 'Hi there', mockEnv, 'wamid.abc123', {
+        progressCallbackUrl: 'https://gateway.example.com/progress-callback',
+      });
 
       expect(fetchMock).toHaveBeenCalledWith(
         'http://localhost:8787/api/v1/chat/queue',
@@ -150,6 +146,61 @@ describe('engine-client', () => {
       const result = await sendMessage('user123', 'Hi there', mockEnv, 'wamid.abc123');
 
       expect(result).toBeNull();
+    });
+
+    it('should send audio message with audio payload', async () => {
+      const mockResponse = { message_id: 'msg-audio', queue_position: 0 };
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => mockResponse });
+
+      const audio = { audioBase64: 'dGVzdA==', audioFormat: 'ogg' };
+      const result = await sendMessage('user123', '', mockEnv, 'wamid.audio1', { audio });
+
+      expect(result).toEqual(mockResponse);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:8787/api/v1/chat/queue',
+        expect.objectContaining({
+          body: JSON.stringify({
+            client_id: 'whatsapp',
+            user_id: 'user123',
+            org: 'test-org',
+            message: '',
+            message_type: 'audio',
+            message_key: 'wamid.audio1',
+            audio_base64: 'dGVzdA==',
+            audio_format: 'ogg',
+          }),
+        })
+      );
+    });
+
+    it('should send audio message with progress callback', async () => {
+      const mockResponse = { message_id: 'msg-audio2', queue_position: 0 };
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => mockResponse });
+
+      const audio = { audioBase64: 'dGVzdA==', audioFormat: 'ogg' };
+      await sendMessage('user123', '', mockEnv, 'wamid.audio2', {
+        progressCallbackUrl: 'https://gateway.example.com/progress-callback',
+        audio,
+      });
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:8787/api/v1/chat/queue',
+        expect.objectContaining({
+          body: JSON.stringify({
+            client_id: 'whatsapp',
+            user_id: 'user123',
+            org: 'test-org',
+            message: '',
+            message_type: 'audio',
+            message_key: 'wamid.audio2',
+            audio_base64: 'dGVzdA==',
+            audio_format: 'ogg',
+            progress_callback_url: 'https://gateway.example.com/progress-callback',
+            progress_mode: 'iteration',
+            progress_throttle_seconds: 3.0,
+          }),
+        })
+      );
     });
   });
 });

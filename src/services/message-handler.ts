@@ -298,7 +298,7 @@ async function handleCompleteCallback(callback: EngineCallback, env: Env): Promi
     await sendToWhatsApp(
       callback.user_id,
       'Sorry, I could not deliver the audio response. Please try again.',
-      env,
+      env
     );
   }
 }

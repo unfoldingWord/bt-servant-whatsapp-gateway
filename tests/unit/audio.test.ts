@@ -244,5 +244,28 @@ describe('audio support', () => {
 
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
+
+    it('should send error fallback when audio fails and no text available', async () => {
+      // Audio upload fails, no text to fall back to
+      fetchMock
+        .mockResolvedValueOnce({ ok: false, status: 400, text: async () => 'Error' })
+        .mockResolvedValueOnce({ ok: true });
+
+      const callback: EngineCallback = {
+        type: 'complete',
+        user_id: '1234567890',
+        message_key: 'key123',
+        timestamp: new Date().toISOString(),
+        voice_audio_base64: 'dGVzdA==',
+      };
+
+      await handleEngineCallback(callback, mockEnv);
+
+      // Audio upload failed (1 call), then error fallback sent (1 call)
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const lastCall = fetchMock.mock.calls[1];
+      const body = JSON.parse(lastCall[1]?.body as string);
+      expect(body.text.body).toContain('Sorry');
+    });
   });
 });

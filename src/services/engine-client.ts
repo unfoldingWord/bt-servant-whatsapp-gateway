@@ -36,7 +36,7 @@ export interface SendMessageOptions {
  */
 export async function sendMessage(
   userId: string,
-  message: string,
+  message: string | undefined,
   env: Env,
   messageKey: string,
   options?: SendMessageOptions
@@ -48,9 +48,9 @@ export async function sendMessage(
     client_id: CLIENT_ID,
     user_id: userId,
     org: env.ENGINE_ORG,
-    message,
     message_type: audio ? 'audio' : 'text',
     message_key: messageKey,
+    ...(message ? { message } : {}),
   };
 
   if (audio) {

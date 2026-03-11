@@ -7,7 +7,7 @@ export interface MessageRequest {
   client_id: string;
   user_id: string;
   org: string;
-  message: string;
+  message?: string;
   message_type: 'text' | 'audio';
   message_key: string;
   progress_callback_url?: string;

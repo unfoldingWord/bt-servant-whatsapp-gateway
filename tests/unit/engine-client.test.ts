@@ -59,9 +59,9 @@ describe('engine-client', () => {
             client_id: 'whatsapp',
             user_id: 'user123',
             org: 'test-org',
-            message: 'Hi there',
             message_type: 'text',
             message_key: 'wamid.abc123',
+            message: 'Hi there',
           }),
         })
       );
@@ -89,9 +89,9 @@ describe('engine-client', () => {
             client_id: 'whatsapp',
             user_id: 'user123',
             org: 'test-org',
-            message: 'Hi there',
             message_type: 'text',
             message_key: 'wamid.abc123',
+            message: 'Hi there',
             progress_callback_url: 'https://gateway.example.com/progress-callback',
             progress_mode: 'iteration',
             progress_throttle_seconds: 3.0,
@@ -120,9 +120,9 @@ describe('engine-client', () => {
             client_id: 'whatsapp',
             user_id: 'user123',
             org: 'test-org',
-            message: 'Hi there',
             message_type: 'text',
             message_key: 'wamid.abc123',
+            message: 'Hi there',
           }),
         })
       );
@@ -153,7 +153,7 @@ describe('engine-client', () => {
       fetchMock.mockResolvedValueOnce({ ok: true, json: async () => mockResponse });
 
       const audio = { audioBase64: 'dGVzdA==', audioFormat: 'ogg' };
-      const result = await sendMessage('user123', '', mockEnv, 'wamid.audio1', { audio });
+      const result = await sendMessage('user123', undefined, mockEnv, 'wamid.audio1', { audio });
 
       expect(result).toEqual(mockResponse);
       expect(fetchMock).toHaveBeenCalledWith(
@@ -163,7 +163,6 @@ describe('engine-client', () => {
             client_id: 'whatsapp',
             user_id: 'user123',
             org: 'test-org',
-            message: '',
             message_type: 'audio',
             message_key: 'wamid.audio1',
             audio_base64: 'dGVzdA==',
@@ -178,7 +177,7 @@ describe('engine-client', () => {
       fetchMock.mockResolvedValueOnce({ ok: true, json: async () => mockResponse });
 
       const audio = { audioBase64: 'dGVzdA==', audioFormat: 'ogg' };
-      await sendMessage('user123', '', mockEnv, 'wamid.audio2', {
+      await sendMessage('user123', undefined, mockEnv, 'wamid.audio2', {
         progressCallbackUrl: 'https://gateway.example.com/progress-callback',
         audio,
       });
@@ -190,7 +189,6 @@ describe('engine-client', () => {
             client_id: 'whatsapp',
             user_id: 'user123',
             org: 'test-org',
-            message: '',
             message_type: 'audio',
             message_key: 'wamid.audio2',
             audio_base64: 'dGVzdA==',

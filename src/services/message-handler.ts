@@ -283,6 +283,26 @@ export function validateEngineCallback(payload: unknown): string | null {
   return validateCallbackFields(p.type as string, p);
 }
 
+async function handleCompleteCallback(callback: EngineCallback, env: Env): Promise<void> {
+  let audioSent = false;
+  if (callback.voice_audio_base64) {
+    audioSent = await sendAudioMessage(callback.user_id, callback.voice_audio_base64, env);
+    if (!audioSent) {
+      logger.warn('Failed to send audio response, falling back to text only');
+    }
+  }
+  if (!audioSent && callback.text) {
+    await sendResponses(callback.user_id, [callback.text], env);
+  } else if (!audioSent && !callback.text) {
+    logger.error('Audio delivery failed with no text fallback');
+    await sendToWhatsApp(
+      callback.user_id,
+      'Sorry, I could not deliver the audio response. Please try again.',
+      env,
+    );
+  }
+}
+
 /**
  * Handle an engine callback, dispatching by type.
  */
@@ -298,15 +318,7 @@ export async function handleEngineCallback(callback: EngineCallback, env: Env): 
       await sendToWhatsApp(callback.user_id, callback.text, env);
     }
   } else if (callback.type === 'complete') {
-    if (callback.voice_audio_base64) {
-      const audioSent = await sendAudioMessage(callback.user_id, callback.voice_audio_base64, env);
-      if (!audioSent) {
-        logger.warn('Failed to send audio response, falling back to text only');
-      }
-    }
-    if (callback.text) {
-      await sendResponses(callback.user_id, [callback.text], env);
-    }
+    await handleCompleteCallback(callback, env);
   } else if (callback.type === 'error') {
     const errorMsg = callback.error ?? 'Unknown error';
     logger.error('Engine reported error', { error: errorMsg });

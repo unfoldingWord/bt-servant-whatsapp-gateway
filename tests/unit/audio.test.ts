@@ -186,11 +186,10 @@ describe('audio support', () => {
   });
 
   describe('handleEngineCallback with audio', () => {
-    it('should send audio then text for complete callback with both', async () => {
-      // Audio upload + audio send + text send
+    it('should send only audio when audio succeeds (skip text)', async () => {
+      // Audio upload + audio send (text is skipped when audio succeeds)
       fetchMock
         .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-100' }) })
-        .mockResolvedValueOnce({ ok: true })
         .mockResolvedValueOnce({ ok: true });
 
       const callback: EngineCallback = {
@@ -204,7 +203,7 @@ describe('audio support', () => {
 
       await handleEngineCallback(callback, mockEnv);
 
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     it('should still send text when audio send fails', async () => {

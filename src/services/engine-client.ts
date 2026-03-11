@@ -50,7 +50,7 @@ export async function sendMessage(
     org: env.ENGINE_ORG,
     message_type: audio ? 'audio' : 'text',
     message_key: messageKey,
-    ...(message ? { message } : {}),
+    ...(message !== undefined ? { message } : {}),
   };
 
   if (audio) {

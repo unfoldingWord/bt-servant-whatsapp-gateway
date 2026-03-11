@@ -204,7 +204,7 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
   const options: SendMessageOptions = { progressCallbackUrl: getProgressCallbackUrl(env) };
   if (audio) options.audio = audio;
 
-  const messageText = audio ? '[voice message]' : message.text;
+  const messageText = audio ? undefined : message.text;
   const result = await sendToEngine(message.userId, messageText, env, message.messageId, options);
 
   if (!result) {

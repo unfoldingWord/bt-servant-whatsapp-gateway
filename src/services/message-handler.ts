@@ -289,9 +289,20 @@ export function validateEngineCallback(payload: unknown): string | null {
   return validateCallbackFields(p.type as string, p);
 }
 
+function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.search = '';
+    return parsed.toString();
+  } catch {
+    return '<invalid-url>';
+  }
+}
+
 async function fetchAudioFromUrl(url: string, env: Env): Promise<ArrayBuffer | null> {
+  const safeUrl = redactUrl(url);
   if (!url.startsWith('https://')) {
-    logger.error('Refusing to fetch non-HTTPS audio URL', { url });
+    logger.error('Refusing to fetch non-HTTPS audio URL', { url: safeUrl });
     return null;
   }
   try {
@@ -299,25 +310,26 @@ async function fetchAudioFromUrl(url: string, env: Env): Promise<ArrayBuffer | n
       headers: { Authorization: `Bearer ${env.ENGINE_API_KEY}` },
     });
     if (!response.ok) {
-      logger.error('Failed to fetch audio from URL', { status: response.status, url });
+      logger.error('Failed to fetch audio from URL', { status: response.status, url: safeUrl });
       return null;
     }
     const contentLength = response.headers.get('Content-Length');
-    if (contentLength && parseInt(contentLength, 10) > MAX_AUDIO_SIZE) {
-      logger.error('Audio from URL exceeds size limit', { contentLength, url });
+    const parsedLength = contentLength ? parseInt(contentLength, 10) : NaN;
+    if (!Number.isNaN(parsedLength) && parsedLength > MAX_AUDIO_SIZE) {
+      logger.error('Audio from URL exceeds size limit', { contentLength, url: safeUrl });
       return null;
     }
     const buffer = await response.arrayBuffer();
     if (buffer.byteLength > MAX_AUDIO_SIZE) {
       logger.error('Audio from URL exceeds size limit after download', {
         size: buffer.byteLength,
-        url,
+        url: safeUrl,
       });
       return null;
     }
     return buffer;
   } catch (err) {
-    logger.error('Network error fetching audio URL', { url, error: String(err) });
+    logger.error('Network error fetching audio URL', { url: safeUrl, error: String(err) });
     return null;
   }
 }

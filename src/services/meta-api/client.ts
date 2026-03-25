@@ -113,8 +113,8 @@ export async function uploadAudioFromBuffer(
 
 /** Upload base64-encoded audio to Meta. Delegates to uploadAudioFromBuffer. */
 export async function uploadAudioMedia(audioBase64: string, env: Env): Promise<string | null> {
-  const bytes = new Uint8Array(Array.from(atob(audioBase64), (c) => c.charCodeAt(0)));
-  return uploadAudioFromBuffer(bytes.buffer, env);
+  const bytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
+  return uploadAudioFromBuffer(bytes.buffer as ArrayBuffer, env);
 }
 
 /**

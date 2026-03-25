@@ -80,13 +80,15 @@ export async function sendTypingIndicator(messageId: string, env: Env): Promise<
 }
 
 /**
- * Upload base64-encoded audio to Meta's media API.
+ * Upload an audio ArrayBuffer to Meta's media API.
  * Returns the media ID on success, null on failure.
  */
-export async function uploadAudioMedia(audioBase64: string, env: Env): Promise<string | null> {
+export async function uploadAudioFromBuffer(
+  audioBytes: ArrayBuffer,
+  env: Env
+): Promise<string | null> {
   const url = `${getBaseUrl()}/${env.META_PHONE_NUMBER_ID}/media`;
-  const bytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
-  const blob = new Blob([bytes], { type: 'audio/mpeg' });
+  const blob = new Blob([audioBytes], { type: 'audio/mpeg' });
 
   const form = new FormData();
   form.append('file', blob, 'audio.mp3');
@@ -107,6 +109,12 @@ export async function uploadAudioMedia(audioBase64: string, env: Env): Promise<s
 
   const result = (await response.json()) as { id?: string };
   return result.id ?? null;
+}
+
+/** Upload base64-encoded audio to Meta. Delegates to uploadAudioFromBuffer. */
+export async function uploadAudioMedia(audioBase64: string, env: Env): Promise<string | null> {
+  const bytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
+  return uploadAudioFromBuffer(bytes.buffer as ArrayBuffer, env);
 }
 
 /**
@@ -148,6 +156,20 @@ export async function sendAudioMessage(
   env: Env
 ): Promise<boolean> {
   const mediaId = await uploadAudioMedia(audioBase64, env);
+  if (!mediaId) return false;
+  return sendAudioById(to, mediaId, env);
+}
+
+/**
+ * Send an audio message from an ArrayBuffer to a WhatsApp user.
+ * Uploads the buffer to Meta, then sends using the media ID.
+ */
+export async function sendAudioFromBuffer(
+  to: string,
+  audioBytes: ArrayBuffer,
+  env: Env
+): Promise<boolean> {
+  const mediaId = await uploadAudioFromBuffer(audioBytes, env);
   if (!mediaId) return false;
   return sendAudioById(to, mediaId, env);
 }

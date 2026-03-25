@@ -15,6 +15,7 @@ import {
   sendTextMessage as sendToWhatsApp,
   sendTypingIndicator,
   sendAudioMessage,
+  sendAudioFromBuffer,
   downloadMedia,
 } from './meta-api/client';
 import { sendMessage as sendToEngine } from './engine-client';
@@ -254,8 +255,13 @@ function validateCallbackFields(type: string, p: Record<string, unknown>): strin
   if (type === 'progress' && !isNonEmptyString(p.text)) {
     return 'Missing or invalid text for progress callback';
   }
-  if (type === 'complete' && !isNonEmptyString(p.text) && !isNonEmptyString(p.voice_audio_base64)) {
-    return 'Missing text or voice_audio_base64 for complete callback';
+  if (
+    type === 'complete' &&
+    !isNonEmptyString(p.text) &&
+    !isNonEmptyString(p.voice_audio_base64) &&
+    !isNonEmptyString(p.voice_audio_url)
+  ) {
+    return 'Missing text, voice_audio_base64, or voice_audio_url for complete callback';
   }
   if (type === 'error' && !isNonEmptyString(p.error)) {
     return 'Missing or invalid error for error callback';
@@ -283,17 +289,77 @@ export function validateEngineCallback(payload: unknown): string | null {
   return validateCallbackFields(p.type as string, p);
 }
 
-async function handleCompleteCallback(callback: EngineCallback, env: Env): Promise<void> {
-  let audioSent = false;
-  if (callback.voice_audio_base64) {
-    audioSent = await sendAudioMessage(callback.user_id, callback.voice_audio_base64, env);
-    if (!audioSent) {
-      logger.warn('Failed to send audio response, falling back to text only');
+function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.search = '';
+    return parsed.toString();
+  } catch {
+    return '<invalid-url>';
+  }
+}
+
+async function fetchAudioFromUrl(url: string, env: Env): Promise<ArrayBuffer | null> {
+  const safeUrl = redactUrl(url);
+  if (!url.startsWith('https://')) {
+    logger.error('Refusing to fetch non-HTTPS audio URL', { url: safeUrl });
+    return null;
+  }
+  try {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${env.ENGINE_API_KEY}` },
+    });
+    if (!response.ok) {
+      logger.error('Failed to fetch audio from URL', { status: response.status, url: safeUrl });
+      return null;
+    }
+    const contentLength = response.headers.get('Content-Length');
+    const parsedLength = contentLength ? parseInt(contentLength, 10) : NaN;
+    if (!Number.isNaN(parsedLength) && parsedLength > MAX_AUDIO_SIZE) {
+      logger.error('Audio from URL exceeds size limit', { contentLength, url: safeUrl });
+      return null;
+    }
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > MAX_AUDIO_SIZE) {
+      logger.error('Audio from URL exceeds size limit after download', {
+        size: buffer.byteLength,
+        url: safeUrl,
+      });
+      return null;
+    }
+    return buffer;
+  } catch (err) {
+    logger.error('Network error fetching audio URL', { url: safeUrl, error: String(err) });
+    return null;
+  }
+}
+
+async function tryAudioDelivery(callback: EngineCallback, env: Env): Promise<boolean> {
+  if (callback.voice_audio_url) {
+    const audioBytes = await fetchAudioFromUrl(callback.voice_audio_url, env);
+    if (audioBytes) {
+      const sent = await sendAudioFromBuffer(callback.user_id, audioBytes, env);
+      if (sent) return true;
+      logger.warn('Meta upload failed for URL audio, trying base64 fallback');
+    } else {
+      logger.warn('Failed to fetch audio from URL, trying base64 fallback');
     }
   }
-  if (!audioSent && callback.text) {
+  if (callback.voice_audio_base64) {
+    const sent = await sendAudioMessage(callback.user_id, callback.voice_audio_base64, env);
+    if (sent) return true;
+    logger.warn('Failed to send base64 audio response');
+  }
+  return false;
+}
+
+async function handleCompleteCallback(callback: EngineCallback, env: Env): Promise<void> {
+  const audioSent = await tryAudioDelivery(callback, env);
+  if (audioSent) return;
+
+  if (callback.text) {
     await sendResponses(callback.user_id, [callback.text], env);
-  } else if (!audioSent && !callback.text) {
+  } else {
     logger.error('Audio delivery failed with no text fallback');
     await sendToWhatsApp(
       callback.user_id,

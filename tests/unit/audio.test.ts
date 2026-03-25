@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   uploadAudioMedia,
+  uploadAudioFromBuffer,
   sendAudioById,
   sendAudioMessage,
+  sendAudioFromBuffer,
 } from '../../src/services/meta-api/client';
 import { handleEngineCallback, validateEngineCallback } from '../../src/services/message-handler';
 import type { Env } from '../../src/config/types';
@@ -75,6 +77,47 @@ describe('audio support', () => {
     });
   });
 
+  describe('uploadAudioFromBuffer', () => {
+    it('should upload buffer and return media ID', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: 'media-buf-1' }),
+      });
+
+      const buffer = new Uint8Array([1, 2, 3]).buffer;
+      const result = await uploadAudioFromBuffer(buffer, mockEnv);
+
+      expect(result).toBe('media-buf-1');
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://graph.facebook.com/v23.0/123456789/media',
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+
+    it('should return null on upload failure', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: async () => 'Server Error',
+      });
+
+      const buffer = new Uint8Array([1, 2, 3]).buffer;
+      const result = await uploadAudioFromBuffer(buffer, mockEnv);
+      expect(result).toBeNull();
+    });
+
+    it('should return null when response has no id', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}),
+      });
+
+      const buffer = new Uint8Array([1, 2, 3]).buffer;
+      const result = await uploadAudioFromBuffer(buffer, mockEnv);
+      expect(result).toBeNull();
+    });
+  });
+
   describe('sendAudioById', () => {
     it('should send audio message with media ID', async () => {
       fetchMock.mockResolvedValueOnce({ ok: true });
@@ -143,12 +186,61 @@ describe('audio support', () => {
     });
   });
 
+  describe('sendAudioFromBuffer', () => {
+    it('should upload buffer then send audio', async () => {
+      fetchMock
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-buf-2' }) })
+        .mockResolvedValueOnce({ ok: true });
+
+      const buffer = new Uint8Array([1, 2, 3]).buffer;
+      const result = await sendAudioFromBuffer('1234567890', buffer, mockEnv);
+
+      expect(result).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('should return false when upload fails', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        text: async () => 'Bad Request',
+      });
+
+      const buffer = new Uint8Array([1, 2, 3]).buffer;
+      const result = await sendAudioFromBuffer('1234567890', buffer, mockEnv);
+
+      expect(result).toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('validateEngineCallback with audio', () => {
     it('should accept complete callback with only voice_audio_base64', () => {
       const result = validateEngineCallback({
         type: 'complete',
         user_id: 'user123',
         message_key: 'key123',
+        voice_audio_base64: 'dGVzdA==',
+      });
+      expect(result).toBeNull();
+    });
+
+    it('should accept complete callback with only voice_audio_url', () => {
+      const result = validateEngineCallback({
+        type: 'complete',
+        user_id: 'user123',
+        message_key: 'key123',
+        voice_audio_url: 'https://r2.example.com/audio/abc.mp3',
+      });
+      expect(result).toBeNull();
+    });
+
+    it('should accept complete callback with both voice_audio_url and voice_audio_base64', () => {
+      const result = validateEngineCallback({
+        type: 'complete',
+        user_id: 'user123',
+        message_key: 'key123',
+        voice_audio_url: 'https://r2.example.com/audio/abc.mp3',
         voice_audio_base64: 'dGVzdA==',
       });
       expect(result).toBeNull();
@@ -186,8 +278,7 @@ describe('audio support', () => {
   });
 
   describe('handleEngineCallback with audio', () => {
-    it('should send only audio when audio succeeds (skip text)', async () => {
-      // Audio upload + audio send (text is skipped when audio succeeds)
+    it('should send only audio when base64 audio succeeds (skip text)', async () => {
       fetchMock
         .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-100' }) })
         .mockResolvedValueOnce({ ok: true });
@@ -206,8 +297,7 @@ describe('audio support', () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
-    it('should still send text when audio send fails', async () => {
-      // Audio upload fails, then text send succeeds
+    it('should still send text when base64 audio send fails', async () => {
       fetchMock
         .mockResolvedValueOnce({ ok: false, status: 400, text: async () => 'Error' })
         .mockResolvedValueOnce({ ok: true });
@@ -223,7 +313,6 @@ describe('audio support', () => {
 
       await handleEngineCallback(callback, mockEnv);
 
-      // Audio upload failed (1 call), then text sent (1 call)
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
@@ -246,7 +335,6 @@ describe('audio support', () => {
     });
 
     it('should send error fallback when audio fails and no text available', async () => {
-      // Audio upload fails, no text to fall back to
       fetchMock
         .mockResolvedValueOnce({ ok: false, status: 400, text: async () => 'Error' })
         .mockResolvedValueOnce({ ok: true });
@@ -261,11 +349,227 @@ describe('audio support', () => {
 
       await handleEngineCallback(callback, mockEnv);
 
-      // Audio upload failed (1 call), then error fallback sent (1 call)
       expect(fetchMock).toHaveBeenCalledTimes(2);
       const lastCall = fetchMock.mock.calls[1];
       const body = JSON.parse(lastCall[1]?.body as string);
       expect(body.text.body).toContain('Sorry');
+    });
+
+    it('should fetch audio from URL with Bearer auth and send it', async () => {
+      const audioBytes = new Uint8Array([0xff, 0xfb, 0x90]).buffer;
+      // 1: fetch audio URL, 2: upload to Meta, 3: send audio message
+      fetchMock
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'Content-Length': '3' }),
+          arrayBuffer: async () => audioBytes,
+        })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-url-1' }) })
+        .mockResolvedValueOnce({ ok: true });
+
+      const callback: EngineCallback = {
+        type: 'complete',
+        user_id: '1234567890',
+        message_key: 'key123',
+        timestamp: new Date().toISOString(),
+        voice_audio_url: 'https://r2.example.com/audio/abc.mp3',
+      };
+
+      await handleEngineCallback(callback, mockEnv);
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      // Verify first call fetched URL with Bearer auth
+      const urlFetchCall = fetchMock.mock.calls[0];
+      expect(urlFetchCall[0]).toBe('https://r2.example.com/audio/abc.mp3');
+      expect(urlFetchCall[1].headers.Authorization).toBe('Bearer test-engine-key');
+    });
+
+    it('should fall back to base64 when URL fetch fails', async () => {
+      // 1: URL fetch fails, 2: base64 upload succeeds, 3: send audio
+      fetchMock
+        .mockResolvedValueOnce({ ok: false, status: 404 })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-b64-1' }) })
+        .mockResolvedValueOnce({ ok: true });
+
+      const callback: EngineCallback = {
+        type: 'complete',
+        user_id: '1234567890',
+        message_key: 'key123',
+        timestamp: new Date().toISOString(),
+        voice_audio_url: 'https://r2.example.com/audio/abc.mp3',
+        voice_audio_base64: 'dGVzdA==',
+      };
+
+      await handleEngineCallback(callback, mockEnv);
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('should fall back to text when URL fetch fails and no base64', async () => {
+      // 1: URL fetch fails, 2: send text
+      fetchMock
+        .mockResolvedValueOnce({ ok: false, status: 500 })
+        .mockResolvedValueOnce({ ok: true });
+
+      const callback: EngineCallback = {
+        type: 'complete',
+        user_id: '1234567890',
+        message_key: 'key123',
+        timestamp: new Date().toISOString(),
+        text: 'Fallback text response',
+        voice_audio_url: 'https://r2.example.com/audio/abc.mp3',
+      };
+
+      await handleEngineCallback(callback, mockEnv);
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const textCall = fetchMock.mock.calls[1];
+      const body = JSON.parse(textCall[1]?.body as string);
+      expect(body.text.body).toBe('Fallback text response');
+    });
+
+    it('should send Sorry when URL fetch fails, no base64, and no text', async () => {
+      // 1: URL fetch fails, 2: send Sorry message
+      fetchMock
+        .mockResolvedValueOnce({ ok: false, status: 500 })
+        .mockResolvedValueOnce({ ok: true });
+
+      const callback: EngineCallback = {
+        type: 'complete',
+        user_id: '1234567890',
+        message_key: 'key123',
+        timestamp: new Date().toISOString(),
+        voice_audio_url: 'https://r2.example.com/audio/abc.mp3',
+      };
+
+      await handleEngineCallback(callback, mockEnv);
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const lastCall = fetchMock.mock.calls[1];
+      const body = JSON.parse(lastCall[1]?.body as string);
+      expect(body.text.body).toContain('Sorry');
+    });
+
+    it('should fall back to base64 when URL fetch succeeds but Meta upload fails', async () => {
+      const audioBytes = new Uint8Array([0xff, 0xfb, 0x90]).buffer;
+      // 1: URL fetch OK, 2: Meta upload fails, 3: base64 upload OK, 4: send audio
+      fetchMock
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'Content-Length': '3' }),
+          arrayBuffer: async () => audioBytes,
+        })
+        .mockResolvedValueOnce({ ok: false, status: 400, text: async () => 'Bad Request' })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-b64-2' }) })
+        .mockResolvedValueOnce({ ok: true });
+
+      const callback: EngineCallback = {
+        type: 'complete',
+        user_id: '1234567890',
+        message_key: 'key123',
+        timestamp: new Date().toISOString(),
+        voice_audio_url: 'https://r2.example.com/audio/abc.mp3',
+        voice_audio_base64: 'dGVzdA==',
+      };
+
+      await handleEngineCallback(callback, mockEnv);
+
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    });
+
+    it('should fall back to base64 when URL fetch throws network error', async () => {
+      // 1: URL fetch throws, 2: base64 upload succeeds, 3: send audio
+      fetchMock
+        .mockRejectedValueOnce(new Error('DNS resolution failed'))
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-b64-3' }) })
+        .mockResolvedValueOnce({ ok: true });
+
+      const callback: EngineCallback = {
+        type: 'complete',
+        user_id: '1234567890',
+        message_key: 'key123',
+        timestamp: new Date().toISOString(),
+        voice_audio_url: 'https://r2.example.com/audio/abc.mp3',
+        voice_audio_base64: 'dGVzdA==',
+      };
+
+      await handleEngineCallback(callback, mockEnv);
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('should reject non-HTTPS audio URL and fall back to base64', async () => {
+      // No URL fetch attempted, 1: base64 upload succeeds, 2: send audio
+      fetchMock
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-b64-4' }) })
+        .mockResolvedValueOnce({ ok: true });
+
+      const callback: EngineCallback = {
+        type: 'complete',
+        user_id: '1234567890',
+        message_key: 'key123',
+        timestamp: new Date().toISOString(),
+        voice_audio_url: 'http://insecure.example.com/audio/abc.mp3',
+        voice_audio_base64: 'dGVzdA==',
+      };
+
+      await handleEngineCallback(callback, mockEnv);
+
+      // URL fetch was never called — only base64 upload + send
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('should reject audio URL when Content-Length exceeds limit', async () => {
+      // 1: URL fetch returns oversized Content-Length, 2: base64 upload, 3: send
+      fetchMock
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'Content-Length': String(30 * 1024 * 1024) }),
+          arrayBuffer: async () => new ArrayBuffer(0),
+        })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-b64-5' }) })
+        .mockResolvedValueOnce({ ok: true });
+
+      const callback: EngineCallback = {
+        type: 'complete',
+        user_id: '1234567890',
+        message_key: 'key123',
+        timestamp: new Date().toISOString(),
+        voice_audio_url: 'https://r2.example.com/audio/huge.mp3',
+        voice_audio_base64: 'dGVzdA==',
+      };
+
+      await handleEngineCallback(callback, mockEnv);
+
+      // URL fetch returned oversized header (1 call), then base64 upload + send (2 calls)
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('should reject audio URL when body exceeds limit without Content-Length header', async () => {
+      const oversizedBuffer = new ArrayBuffer(26 * 1024 * 1024);
+      // 1: URL fetch OK (no Content-Length, chunked), 2: base64 upload, 3: send
+      fetchMock
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers(),
+          arrayBuffer: async () => oversizedBuffer,
+        })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-b64-6' }) })
+        .mockResolvedValueOnce({ ok: true });
+
+      const callback: EngineCallback = {
+        type: 'complete',
+        user_id: '1234567890',
+        message_key: 'key123',
+        timestamp: new Date().toISOString(),
+        voice_audio_url: 'https://r2.example.com/audio/huge-chunked.mp3',
+        voice_audio_base64: 'dGVzdA==',
+      };
+
+      await handleEngineCallback(callback, mockEnv);
+
+      // URL fetch + oversized body rejected (1 call), then base64 upload + send (2 calls)
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     });
   });
 });

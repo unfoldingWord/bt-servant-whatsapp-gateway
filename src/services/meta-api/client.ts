@@ -88,12 +88,12 @@ export async function uploadAudioFromBuffer(
   env: Env
 ): Promise<string | null> {
   const url = `${getBaseUrl()}/${env.META_PHONE_NUMBER_ID}/media`;
-  const blob = new Blob([audioBytes], { type: 'audio/mpeg' });
+  const blob = new Blob([audioBytes], { type: 'audio/ogg' });
 
   const form = new FormData();
-  form.append('file', blob, 'audio.mp3');
+  form.append('file', blob, 'audio.opus');
   form.append('messaging_product', 'whatsapp');
-  form.append('type', 'audio/mpeg');
+  form.append('type', 'audio/ogg');
 
   const response = await fetch(url, {
     method: 'POST',

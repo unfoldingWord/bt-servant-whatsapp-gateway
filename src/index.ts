@@ -152,7 +152,7 @@ app.post('/meta-whatsapp', async (c) => {
  *
  * Because JS is single-threaded, the synchronous get()+set() below is atomic
  * within an isolate — no concurrent request can interleave between check and
- * mark. Cross-isolate dedup is handled by the worker's UserQueue DO which
+ * mark. Cross-isolate dedup is handled by the worker's UserDO which
  * serializes processing per-user. Expired entries are swept periodically
  * (at most once per SWEEP_INTERVAL_MS) so the map doesn't grow unbounded.
  */

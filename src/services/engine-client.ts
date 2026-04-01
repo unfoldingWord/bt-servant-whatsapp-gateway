@@ -3,7 +3,7 @@
  */
 
 import type { Env } from '../config/types';
-import type { MessageRequest, QueuedResponse } from '../types/engine';
+import type { MessageRequest, ChatResponse } from '../types/engine';
 import { logger } from '../utils/logger';
 
 /** Client identifier for this gateway */
@@ -32,7 +32,7 @@ export interface SendMessageOptions {
 }
 
 /**
- * Send a message to the engine for queued processing.
+ * Send a message to the engine for processing.
  */
 export async function sendMessage(
   userId: string,
@@ -40,8 +40,8 @@ export async function sendMessage(
   env: Env,
   messageKey: string,
   options?: SendMessageOptions
-): Promise<QueuedResponse | null> {
-  const url = `${env.ENGINE_BASE_URL}/api/v1/chat/queue`;
+): Promise<ChatResponse | null> {
+  const url = `${env.ENGINE_BASE_URL}/api/v1/chat`;
   const { progressCallbackUrl, audio } = options ?? {};
 
   const payload: MessageRequest = {
@@ -77,7 +77,7 @@ export async function sendMessage(
       return null;
     }
 
-    return (await response.json()) as QueuedResponse;
+    return (await response.json()) as ChatResponse;
   } catch (error) {
     logger.error('Engine connection error', {
       error: error instanceof Error ? error.message : String(error),

@@ -209,7 +209,7 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
   const result = await sendToEngine(message.userId, messageText, env, message.messageId, options);
 
   if (!result) {
-    logger.error('Failed to queue message with engine');
+    logger.error('Failed to send message to engine');
     await sendToWhatsApp(
       message.userId,
       'Sorry, I encountered an error processing your message. Please try again.',
@@ -218,9 +218,8 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
     return;
   }
 
-  logger.info('Message queued', {
+  logger.info('Message accepted', {
     messageId: result.message_id,
-    queuePosition: result.queue_position,
   });
 }
 

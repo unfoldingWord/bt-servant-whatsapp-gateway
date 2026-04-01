@@ -36,7 +36,6 @@ describe('engine-client', () => {
     it('should send a message successfully', async () => {
       const mockResponse = {
         message_id: 'msg-123',
-        queue_position: 0,
       };
 
       fetchMock.mockResolvedValueOnce({
@@ -48,7 +47,7 @@ describe('engine-client', () => {
 
       expect(result).toEqual(mockResponse);
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:8787/api/v1/chat/queue',
+        'http://localhost:8787/api/v1/chat',
         expect.objectContaining({
           method: 'POST',
           headers: {
@@ -70,7 +69,6 @@ describe('engine-client', () => {
     it('should include progress callback and mode when url provided', async () => {
       const mockResponse = {
         message_id: 'msg-456',
-        queue_position: 1,
       };
 
       fetchMock.mockResolvedValueOnce({
@@ -83,7 +81,7 @@ describe('engine-client', () => {
       });
 
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:8787/api/v1/chat/queue',
+        'http://localhost:8787/api/v1/chat',
         expect.objectContaining({
           body: JSON.stringify({
             client_id: 'whatsapp',
@@ -103,7 +101,6 @@ describe('engine-client', () => {
     it('should not include progress callback when url not provided', async () => {
       const mockResponse = {
         message_id: 'msg-789',
-        queue_position: 0,
       };
 
       fetchMock.mockResolvedValueOnce({
@@ -114,7 +111,7 @@ describe('engine-client', () => {
       await sendMessage('user123', 'Hi there', mockEnv, 'wamid.abc123');
 
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:8787/api/v1/chat/queue',
+        'http://localhost:8787/api/v1/chat',
         expect.objectContaining({
           body: JSON.stringify({
             client_id: 'whatsapp',
@@ -149,7 +146,7 @@ describe('engine-client', () => {
     });
 
     it('should send audio message with audio payload', async () => {
-      const mockResponse = { message_id: 'msg-audio', queue_position: 0 };
+      const mockResponse = { message_id: 'msg-audio' };
       fetchMock.mockResolvedValueOnce({ ok: true, json: async () => mockResponse });
 
       const audio = { audioBase64: 'dGVzdA==', audioFormat: 'ogg' };
@@ -157,7 +154,7 @@ describe('engine-client', () => {
 
       expect(result).toEqual(mockResponse);
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:8787/api/v1/chat/queue',
+        'http://localhost:8787/api/v1/chat',
         expect.objectContaining({
           body: JSON.stringify({
             client_id: 'whatsapp',
@@ -173,7 +170,7 @@ describe('engine-client', () => {
     });
 
     it('should send audio message with progress callback', async () => {
-      const mockResponse = { message_id: 'msg-audio2', queue_position: 0 };
+      const mockResponse = { message_id: 'msg-audio2' };
       fetchMock.mockResolvedValueOnce({ ok: true, json: async () => mockResponse });
 
       const audio = { audioBase64: 'dGVzdA==', audioFormat: 'ogg' };
@@ -183,7 +180,7 @@ describe('engine-client', () => {
       });
 
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:8787/api/v1/chat/queue',
+        'http://localhost:8787/api/v1/chat',
         expect.objectContaining({
           body: JSON.stringify({
             client_id: 'whatsapp',

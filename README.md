@@ -79,6 +79,7 @@ ENGINE_ORG = "unfoldingWord"
 CHUNK_SIZE = "1500"
 MESSAGE_AGE_CUTOFF_SECONDS = "3600"
 PROGRESS_THROTTLE_SECONDS = "3.0"
+FACEBOOK_USER_AGENT = "facebookexternalua"
 ```
 
 ### Running
@@ -189,7 +190,7 @@ bt-servant-whatsapp-gateway/
 1. **Webhook Received**: Meta sends a POST request when a user sends a WhatsApp message
 2. **Immediate Response**: Gateway returns 200 immediately (waitUntil pattern)
 3. **Validation**: In background, verifies the signature and user agent
-4. **Message Parsing**: Extracts message content (text only; voice temporarily disabled)
+4. **Message Parsing**: Extracts message content (text and voice/audio)
 5. **Engine Request**: Sends message to engine's `/api/v1/chat` endpoint with callback URL
 6. **Progress Updates**: Engine sends progress updates to `/progress-callback` during processing
 7. **Response Processing**: Engine returns text response

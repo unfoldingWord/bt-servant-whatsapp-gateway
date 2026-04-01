@@ -218,9 +218,8 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
     return;
   }
 
-  logger.info('Message queued', {
+  logger.info('Message accepted', {
     messageId: result.message_id,
-    queuePosition: result.queue_position,
   });
 }
 

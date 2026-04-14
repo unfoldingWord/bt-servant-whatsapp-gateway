@@ -41,7 +41,7 @@ export async function sendMessage(
   messageKey: string,
   options?: SendMessageOptions
 ): Promise<ChatResponse | null> {
-  const url = `${env.ENGINE_BASE_URL}/api/v1/chat`;
+  const url = `${env.ENGINE_BASE_URL}/api/v1/chat/callback`;
   const { progressCallbackUrl, audio } = options ?? {};
 
   const payload: MessageRequest = {

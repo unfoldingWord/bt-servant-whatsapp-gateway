@@ -34,6 +34,22 @@ const MEDIA_REGEX =
   // eslint-disable-next-line security/detect-unsafe-regex
   /https:\/\/[^\s<>"')]+?\.(jpg|jpeg|png|webp|gif|mp4|mov|3gp)(?:\?[^\s<>"')]*)?(?:#[^\s<>"')]*)?(?=$|[\s)\]}>"',;!?]|\.(?:\s|$))/gi;
 
+/**
+ * Markdown-wrapped media link: `![alt](url)` or `[label](url)` where the URL
+ * has a recognized media extension. Non-media links like `[docs](https://...)`
+ * are intentionally not matched here.
+ */
+const MEDIA_MARKDOWN_REGEX =
+  // eslint-disable-next-line security/detect-unsafe-regex
+  /!?\[([^\]]*)\]\((https:\/\/[^\s)]+?\.(?:jpg|jpeg|png|webp|gif|mp4|mov|3gp)(?:\?[^\s)]*)?(?:#[^\s)]*)?)\)/gi;
+
+function unwrapMediaMarkdown(text: string): string {
+  return text.replace(MEDIA_MARKDOWN_REGEX, (_match, label: string, url: string) => {
+    const trimmed = label.trim();
+    return trimmed ? `${trimmed} ${url}` : url;
+  });
+}
+
 function kindFor(ext: string): MediaKind | null {
   const lower = ext.toLowerCase();
   if (IMAGE_EXTS.has(lower)) return 'image';
@@ -70,11 +86,12 @@ function collapseWhitespace(text: string): string {
 }
 
 export function extractMedia(text: string): ExtractionResult {
-  const attachments = findAttachments(text);
+  const unwrapped = unwrapMediaMarkdown(text);
+  const attachments = findAttachments(unwrapped);
   if (attachments.length === 0) {
-    return { attachments: [], captionText: text };
+    return { attachments: [], captionText: unwrapped };
   }
   const urls = attachments.map((a) => a.url);
-  const captionText = collapseWhitespace(stripUrls(text, urls));
+  const captionText = collapseWhitespace(stripUrls(unwrapped, urls));
   return { attachments, captionText };
 }

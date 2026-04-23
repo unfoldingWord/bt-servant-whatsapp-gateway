@@ -63,7 +63,10 @@ function stripUrls(text: string, urls: string[]): string {
 
 function collapseWhitespace(text: string): string {
   const lines = text.split('\n').map((line) => line.trimEnd());
-  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return lines
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function truncateCaption(text: string): { caption: string; truncated: boolean } {

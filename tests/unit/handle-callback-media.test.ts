@@ -50,8 +50,7 @@ describe('handleEngineCallback with inline media', () => {
   it('sends image message with stripped caption when text has one jpg URL', async () => {
     fetchMock.mockResolvedValueOnce({ ok: true });
 
-    const text =
-      'Check this out:\nhttps://cdn.example.com/pic.jpg\n\nIsn’t it beautiful?';
+    const text = 'Check this out:\nhttps://cdn.example.com/pic.jpg\n\nIsn’t it beautiful?';
     await handleEngineCallback(baseCallback(text), mockEnv);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -81,8 +80,7 @@ describe('handleEngineCallback with inline media', () => {
   it('sends two media messages with caption on first only when text has two URLs', async () => {
     fetchMock.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: true });
 
-    const text =
-      'Two things:\nhttps://cdn.example.com/a.jpg\nhttps://cdn.example.com/b.mp4\nDone.';
+    const text = 'Two things:\nhttps://cdn.example.com/a.jpg\nhttps://cdn.example.com/b.mp4\nDone.';
     await handleEngineCallback(baseCallback(text), mockEnv);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);

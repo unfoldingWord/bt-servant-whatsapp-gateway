@@ -351,18 +351,39 @@ async function tryAudioDelivery(callback: EngineCallback, env: Env): Promise<boo
 const META_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const META_VIDEO_MAX_BYTES = 16 * 1024 * 1024;
 
+/** HEAD-precheck request timeout. Bounds the outbound side-effect surface. */
+const PRECHECK_TIMEOUT_MS = 3000;
+
+/** Identifying User-Agent so target servers can attribute / throttle our HEADs. */
+const PRECHECK_USER_AGENT = 'bt-servant-whatsapp-gateway/precheck (+meta-link-size-check)';
+
 /**
  * HEAD-check the source URL to decide whether Meta will accept it as inline
  * media. Lenient: `unknown` lets the send proceed (matches today's behavior).
  * Only `too_large` blocks the inline attempt.
+ *
+ * Threat model: this introduces an outbound HEAD against URLs that originated
+ * in LLM-generated text. The surface is bounded by:
+ *  - HTTPS-only (extractor regex)
+ *  - HEAD method (no response body returned to caller; size cap on parsed length)
+ *  - Cloudflare Workers egress: public internet only, no RFC1918 / link-local
+ *  - Hard timeout below to bound DoS / slow-loris by hostile targets
+ *  - Identifying User-Agent so the target can attribute / throttle us
  */
 async function precheckMediaSize(
   url: string,
   kind: MediaKind
 ): Promise<'ok' | 'too_large' | 'unknown'> {
   const limit = kind === 'video' ? META_VIDEO_MAX_BYTES : META_IMAGE_MAX_BYTES;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PRECHECK_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { method: 'HEAD', redirect: 'follow' });
+    const response = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: { 'User-Agent': PRECHECK_USER_AGENT },
+    });
     if (!response.ok) {
       logger.warn('Media precheck HEAD non-2xx', {
         url: redactUrl(url),
@@ -381,6 +402,8 @@ async function precheckMediaSize(
       error: String(err),
     });
     return 'unknown';
+  } finally {
+    clearTimeout(timer);
   }
 }
 

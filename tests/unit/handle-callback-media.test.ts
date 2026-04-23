@@ -251,4 +251,31 @@ describe('handleEngineCallback with inline media', () => {
     expect(posts).toHaveLength(1);
     expect(posts[0].type).toBe('image');
   });
+
+  it('proceeds with inline media send when HEAD throws (timeout or network error)', async () => {
+    // Simulate the AbortController timeout or an underlying network failure.
+    // Must not stall or regress behavior; falls through to the lenient path.
+    fetchMock
+      .mockRejectedValueOnce(new Error('The operation was aborted'))
+      .mockResolvedValueOnce({ ok: true });
+
+    const text = 'Slow server image:\nhttps://cdn.example.com/pic.jpg\nfinally.';
+    await handleEngineCallback(baseCallback(text), mockEnv);
+
+    const posts = metaPosts(fetchMock);
+    expect(posts).toHaveLength(1);
+    expect(posts[0].type).toBe('image');
+  });
+
+  it('sends a User-Agent identifying the precheck on HEAD requests', async () => {
+    fetchMock.mockResolvedValueOnce(HEAD_UNKNOWN).mockResolvedValueOnce({ ok: true });
+
+    const text = 'Image:\nhttps://cdn.example.com/pic.jpg';
+    await handleEngineCallback(baseCallback(text), mockEnv);
+
+    const headCall = fetchMock.mock.calls.find((c) => c[1]?.method === 'HEAD');
+    expect(headCall).toBeDefined();
+    const ua = (headCall?.[1]?.headers as Record<string, string> | undefined)?.['User-Agent'];
+    expect(ua).toMatch(/bt-servant-whatsapp-gateway/);
+  });
 });

@@ -171,7 +171,7 @@ describe('handleEngineCallback with inline media', () => {
     expect((body.text as Record<string, unknown>).body).toBe(text);
   });
 
-  it('handles worker markdown-wrapped video link without leaking ![..]() shell into caption', async () => {
+  it('handles worker markdown-wrapped video link without leaking ![..]() shell or label echo into caption', async () => {
     fetchMock.mockResolvedValueOnce({ ok: true });
 
     const text = 'Here is:\n[FIA Fishing Net](https://cdn.example.com/vid.mp4)\nEnjoy!';
@@ -183,9 +183,8 @@ describe('handleEngineCallback with inline media', () => {
     const video = body.video as Record<string, unknown>;
     expect(video.link).toBe('https://cdn.example.com/vid.mp4');
     const caption = video.caption as string;
-    expect(caption).toContain('Here is:');
-    expect(caption).toContain('FIA Fishing Net');
-    expect(caption).toContain('Enjoy!');
+    expect(caption).toBe('Here is:\n\nEnjoy!');
+    expect(caption).not.toContain('FIA Fishing Net');
     expect(caption).not.toContain('[');
     expect(caption).not.toContain('](');
     expect(caption).not.toContain('https://');

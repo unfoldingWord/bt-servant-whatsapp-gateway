@@ -37,8 +37,23 @@ const MEDIA_MARKDOWN_REGEX =
   // eslint-disable-next-line security/detect-unsafe-regex
   /!?\[([^\]]*)\]\((https:\/\/[^\s)]+?\.(?:jpg|jpeg|png|webp|gif|mp4|mov|3gp)(?:\?[^\s)]*)?(?:#[^\s)]*)?)\)/gi;
 
+/**
+ * Aquifer-style linked thumbnail: `[![alt](thumb-url)](outer-url)`. The inner
+ * `]` would defeat `MEDIA_MARKDOWN_REGEX`'s `[^\]]*` label so we match the
+ * full nested pattern explicitly to keep the outer media URL attachable.
+ * Both URLs must have recognized media extensions.
+ */
+const LINKED_THUMB_REGEX =
+  // eslint-disable-next-line security/detect-unsafe-regex
+  /\[!?\[([^\]]*)\]\((https:\/\/[^\s)]+?\.(?:jpg|jpeg|png|webp|gif|mp4|mov|3gp)(?:\?[^\s)]*)?(?:#[^\s)]*)?)\)\]\((https:\/\/[^\s)]+?\.(?:jpg|jpeg|png|webp|gif|mp4|mov|3gp)(?:\?[^\s)]*)?(?:#[^\s)]*)?)\)/gi;
+
 function unwrapMediaMarkdown(text: string): string {
-  return text.replace(MEDIA_MARKDOWN_REGEX, (_match, _label: string, url: string) => url);
+  return text
+    .replace(
+      LINKED_THUMB_REGEX,
+      (_match, _label: string, thumbUrl: string, outerUrl: string) => `${thumbUrl} ${outerUrl}`
+    )
+    .replace(MEDIA_MARKDOWN_REGEX, (_match, _label: string, url: string) => url);
 }
 
 function extensionOf(url: string): string | null {
@@ -57,14 +72,20 @@ function kindFor(ext: string): MediaKind | null {
 function findAttachments(text: string): MediaAttachment[] {
   const out: MediaAttachment[] = [];
   const seen = new Set<string>();
-  for (const match of text.matchAll(MEDIA_MARKDOWN_REGEX)) {
-    const url = match[2];
-    if (!url || seen.has(url)) continue;
+  const add = (url: string | undefined): void => {
+    if (!url || seen.has(url)) return;
     seen.add(url);
     const ext = extensionOf(url);
-    if (!ext) continue;
+    if (!ext) return;
     const kind = kindFor(ext);
     if (kind) out.push({ kind, url });
+  };
+  for (const match of text.matchAll(LINKED_THUMB_REGEX)) {
+    add(match[2]);
+    add(match[3]);
+  }
+  for (const match of text.matchAll(MEDIA_MARKDOWN_REGEX)) {
+    add(match[2]);
   }
   return out;
 }

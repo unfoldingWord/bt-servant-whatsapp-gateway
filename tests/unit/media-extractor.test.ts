@@ -80,9 +80,7 @@ describe('extractMedia', () => {
   it('collapses extra blank lines around an unwrapped wrapper', () => {
     const text = 'Line 1\n\n\n![Img](https://cdn.example.com/img.jpg)\n\n\nLine 2';
     const result = extractMedia(text);
-    expect(result.captionText).toBe(
-      'Line 1\n\nhttps://cdn.example.com/img.jpg\n\nLine 2'
-    );
+    expect(result.captionText).toBe('Line 1\n\nhttps://cdn.example.com/img.jpg\n\nLine 2');
   });
 
   it('returns the full caption without truncation even when very long', () => {
@@ -125,9 +123,7 @@ describe('extractMedia', () => {
     const text = 'Watch this:\n[Fishing Net](https://cdn.example.com/vid.mp4)\nEnjoy!';
     const result = extractMedia(text);
     expect(result.attachments).toEqual([{ kind: 'video', url: 'https://cdn.example.com/vid.mp4' }]);
-    expect(result.captionText).toBe(
-      'Watch this:\nhttps://cdn.example.com/vid.mp4\nEnjoy!'
-    );
+    expect(result.captionText).toBe('Watch this:\nhttps://cdn.example.com/vid.mp4\nEnjoy!');
     expect(result.captionText).not.toContain('Fishing Net');
     expect(result.captionText).not.toContain('[');
     expect(result.captionText).not.toContain('](');
@@ -139,9 +135,7 @@ describe('extractMedia', () => {
     expect(result.attachments).toEqual([
       { kind: 'image', url: 'https://cdn.example.com/bread.jpg' },
     ]);
-    expect(result.captionText).toBe(
-      'Bread:\nhttps://cdn.example.com/bread.jpg\n\nMore prose.'
-    );
+    expect(result.captionText).toBe('Bread:\nhttps://cdn.example.com/bread.jpg\n\nMore prose.');
     expect(result.captionText).not.toMatch(/Bread\s+Bread/);
   });
 
@@ -183,9 +177,7 @@ describe('extractMedia', () => {
     const text =
       'First ![Map](https://cdn.example.com/a.jpg) then bare https://cdn.example.com/b.mp4 done.';
     const result = extractMedia(text);
-    expect(result.attachments).toEqual([
-      { kind: 'image', url: 'https://cdn.example.com/a.jpg' },
-    ]);
+    expect(result.attachments).toEqual([{ kind: 'image', url: 'https://cdn.example.com/a.jpg' }]);
     expect(result.captionText).toBe(
       'First https://cdn.example.com/a.jpg then bare https://cdn.example.com/b.mp4 done.'
     );
@@ -195,26 +187,21 @@ describe('extractMedia', () => {
     const text =
       '[Watch](https://cdn.example.com/v.mp4) and also [Open the video](https://cdn.example.com/v.mp4)';
     const result = extractMedia(text);
-    expect(result.attachments).toEqual([
-      { kind: 'video', url: 'https://cdn.example.com/v.mp4' },
-    ]);
+    expect(result.attachments).toEqual([{ kind: 'video', url: 'https://cdn.example.com/v.mp4' }]);
     const occurrences = result.captionText.match(/https:\/\/cdn\.example\.com\/v\.mp4/g);
     expect(occurrences).toHaveLength(2);
   });
 
-  it('Aquifer linked-thumbnail `[![Thumb](thumb.jpg)](v.mp4)`: inner image attaches, outer video URL still survives in caption', () => {
-    // Documented limitation: the outer link's "label" contains brackets so the
-    // wrapper regex (`[^\]]*`) does not match it. Only the inner image is
-    // extracted as an attachment. The outer URL is unaffected by unwrap and
-    // therefore still appears in caption text — the silent-drop fallback
-    // still works.
+  it('Aquifer linked-thumbnail `[![Thumb](thumb.jpg)](v.mp4)`: both inner image and outer video attach; both URLs in caption', () => {
     const text = '[![Thumb](https://cdn.example.com/thumb.jpg)](https://cdn.example.com/v.mp4)';
     const result = extractMedia(text);
     expect(result.attachments).toEqual([
       { kind: 'image', url: 'https://cdn.example.com/thumb.jpg' },
+      { kind: 'video', url: 'https://cdn.example.com/v.mp4' },
     ]);
-    expect(result.captionText).toContain('https://cdn.example.com/thumb.jpg');
-    expect(result.captionText).toContain('https://cdn.example.com/v.mp4');
+    expect(result.captionText).toBe(
+      'https://cdn.example.com/thumb.jpg https://cdn.example.com/v.mp4'
+    );
   });
 
   it('Mount Tabor end-to-end sample: 1 video + 2 images, all three URLs preserved in caption', () => {

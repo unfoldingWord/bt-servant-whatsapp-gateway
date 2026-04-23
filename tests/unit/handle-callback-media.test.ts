@@ -50,8 +50,7 @@ describe('handleEngineCallback with inline media', () => {
   it('sends image message with caption (URL preserved as fallback) when text wraps one jpg URL', async () => {
     fetchMock.mockResolvedValueOnce({ ok: true });
 
-    const text =
-      'Check this out:\n![Pic](https://cdn.example.com/pic.jpg)\n\nIsn’t it beautiful?';
+    const text = 'Check this out:\n![Pic](https://cdn.example.com/pic.jpg)\n\nIsn’t it beautiful?';
     await handleEngineCallback(baseCallback(text), mockEnv);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);

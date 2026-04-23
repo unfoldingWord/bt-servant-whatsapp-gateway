@@ -14,7 +14,7 @@ export interface MediaAttachment {
 
 export interface ExtractionResult {
   attachments: MediaAttachment[];
-  /** Original text with matched URLs removed and whitespace collapsed. Not truncated. */
+  /** Original text with media markdown unwrapped and whitespace collapsed. URLs are preserved. */
   captionText: string;
 }
 
@@ -25,26 +25,41 @@ const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif']);
 const VIDEO_EXTS = new Set(['mp4', 'mov', '3gp']);
 
 /**
- * HTTPS URL ending in a recognized media extension, with optional query/fragment.
- * The trailing lookahead ensures the extension terminates the URL — so
- * `.jpg/foo` does not match but `.jpg`, `.jpg?v=1`, `.jpg.` (sentence-final)
- * and `.jpg)` (in prose) all do.
- */
-const MEDIA_REGEX =
-  // eslint-disable-next-line security/detect-unsafe-regex
-  /https:\/\/[^\s<>"')]+?\.(jpg|jpeg|png|webp|gif|mp4|mov|3gp)(?:\?[^\s<>"')]*)?(?:#[^\s<>"')]*)?(?=$|[\s)\]}>"',;!?]|\.(?:\s|$))/gi;
-
-/**
  * Markdown-wrapped media link: `![alt](url)` or `[label](url)` where the URL
  * has a recognized media extension. Non-media links like `[docs](https://...)`
  * are intentionally not matched here.
+ *
+ * Wrapper presence is treated as explicit attach-intent. Bare URLs in the
+ * surrounding text are not extracted as attachments — they pass through to
+ * the caption as the silent-drop fallback if Meta drops the attachment.
  */
 const MEDIA_MARKDOWN_REGEX =
   // eslint-disable-next-line security/detect-unsafe-regex
   /!?\[([^\]]*)\]\((https:\/\/[^\s)]+?\.(?:jpg|jpeg|png|webp|gif|mp4|mov|3gp)(?:\?[^\s)]*)?(?:#[^\s)]*)?)\)/gi;
 
+/**
+ * Aquifer-style linked thumbnail: `[![alt](thumb-url)](outer-url)`. The inner
+ * `]` would defeat `MEDIA_MARKDOWN_REGEX`'s `[^\]]*` label so we match the
+ * full nested pattern explicitly to keep the outer media URL attachable.
+ * Both URLs must have recognized media extensions.
+ */
+const LINKED_THUMB_REGEX =
+  // eslint-disable-next-line security/detect-unsafe-regex
+  /\[!?\[([^\]]*)\]\((https:\/\/[^\s)]+?\.(?:jpg|jpeg|png|webp|gif|mp4|mov|3gp)(?:\?[^\s)]*)?(?:#[^\s)]*)?)\)\]\((https:\/\/[^\s)]+?\.(?:jpg|jpeg|png|webp|gif|mp4|mov|3gp)(?:\?[^\s)]*)?(?:#[^\s)]*)?)\)/gi;
+
 function unwrapMediaMarkdown(text: string): string {
-  return text.replace(MEDIA_MARKDOWN_REGEX, (_match, _label: string, url: string) => url);
+  return text
+    .replace(
+      LINKED_THUMB_REGEX,
+      (_match, _label: string, thumbUrl: string, outerUrl: string) => `${thumbUrl} ${outerUrl}`
+    )
+    .replace(MEDIA_MARKDOWN_REGEX, (_match, _label: string, url: string) => url);
+}
+
+function extensionOf(url: string): string | null {
+  const m = url.match(/\.([a-z0-9]+)(?:\?[^#]*)?(?:#.*)?$/i);
+  const ext = m?.[1];
+  return ext ? ext.toLowerCase() : null;
 }
 
 function kindFor(ext: string): MediaKind | null {
@@ -55,23 +70,24 @@ function kindFor(ext: string): MediaKind | null {
 }
 
 function findAttachments(text: string): MediaAttachment[] {
-  const attachments: MediaAttachment[] = [];
-  for (const match of text.matchAll(MEDIA_REGEX)) {
-    const ext = match[1];
-    if (!ext) continue;
+  const out: MediaAttachment[] = [];
+  const seen = new Set<string>();
+  const add = (url: string | undefined): void => {
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    const ext = extensionOf(url);
+    if (!ext) return;
     const kind = kindFor(ext);
-    if (!kind) continue;
-    attachments.push({ kind, url: match[0] });
+    if (kind) out.push({ kind, url });
+  };
+  for (const match of text.matchAll(LINKED_THUMB_REGEX)) {
+    add(match[2]);
+    add(match[3]);
   }
-  return attachments;
-}
-
-function stripUrls(text: string, urls: string[]): string {
-  let result = text;
-  for (const url of urls) {
-    result = result.split(url).join('');
+  for (const match of text.matchAll(MEDIA_MARKDOWN_REGEX)) {
+    add(match[2]);
   }
-  return result;
+  return out;
 }
 
 function collapseWhitespace(text: string): string {
@@ -83,12 +99,8 @@ function collapseWhitespace(text: string): string {
 }
 
 export function extractMedia(text: string): ExtractionResult {
+  const attachments = findAttachments(text);
   const unwrapped = unwrapMediaMarkdown(text);
-  const attachments = findAttachments(unwrapped);
-  if (attachments.length === 0) {
-    return { attachments: [], captionText: unwrapped };
-  }
-  const urls = attachments.map((a) => a.url);
-  const captionText = collapseWhitespace(stripUrls(unwrapped, urls));
+  const captionText = collapseWhitespace(unwrapped);
   return { attachments, captionText };
 }

@@ -21,7 +21,7 @@ import {
   downloadMedia,
 } from './meta-api/client';
 import { extractMedia, MAX_CAPTION_LENGTH } from './media-extractor';
-import type { MediaAttachment } from './media-extractor';
+import type { MediaAttachment, MediaKind } from './media-extractor';
 import { sendMessage as sendToEngine } from './engine-client';
 import type { AudioPayload, SendMessageOptions } from './engine-client';
 import { chunkMessage } from './chunking';
@@ -347,6 +347,43 @@ async function tryAudioDelivery(callback: EngineCallback, env: Env): Promise<boo
   return false;
 }
 
+/** Meta WhatsApp Cloud API per-link size caps. */
+const META_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const META_VIDEO_MAX_BYTES = 16 * 1024 * 1024;
+
+/**
+ * HEAD-check the source URL to decide whether Meta will accept it as inline
+ * media. Lenient: `unknown` lets the send proceed (matches today's behavior).
+ * Only `too_large` blocks the inline attempt.
+ */
+async function precheckMediaSize(
+  url: string,
+  kind: MediaKind
+): Promise<'ok' | 'too_large' | 'unknown'> {
+  const limit = kind === 'video' ? META_VIDEO_MAX_BYTES : META_IMAGE_MAX_BYTES;
+  try {
+    const response = await fetch(url, { method: 'HEAD', redirect: 'follow' });
+    if (!response.ok) {
+      logger.warn('Media precheck HEAD non-2xx', {
+        url: redactUrl(url),
+        status: response.status,
+      });
+      return 'unknown';
+    }
+    const lenHeader = response.headers.get('Content-Length');
+    if (!lenHeader) return 'unknown';
+    const size = parseInt(lenHeader, 10);
+    if (Number.isNaN(size)) return 'unknown';
+    return size > limit ? 'too_large' : 'ok';
+  } catch (err) {
+    logger.warn('Media precheck HEAD failed', {
+      url: redactUrl(url),
+      error: String(err),
+    });
+    return 'unknown';
+  }
+}
+
 async function sendOneAttachment(
   userId: string,
   attachment: MediaAttachment,
@@ -359,13 +396,37 @@ async function sendOneAttachment(
   return sendVideoMessage(userId, attachment.url, caption, env);
 }
 
+/**
+ * Pre-check the source URL size before attempting an inline media send.
+ * Returns false if the file is known to exceed Meta's per-link cap (the
+ * caller's existing fallback path will degrade gracefully) — Meta returns
+ * 200 even for oversized links and silently drops delivery, so we have to
+ * catch this client-side. Returns true otherwise.
+ */
+async function trySendAttachmentChecked(
+  userId: string,
+  attachment: MediaAttachment,
+  caption: string | undefined,
+  env: Env
+): Promise<boolean> {
+  const status = await precheckMediaSize(attachment.url, attachment.kind);
+  if (status === 'too_large') {
+    logger.warn('Media exceeds Meta inline-link size limit, skipping media send', {
+      kind: attachment.kind,
+      url: redactUrl(attachment.url),
+    });
+    return false;
+  }
+  return sendOneAttachment(userId, attachment, caption, env);
+}
+
 async function sendRemainingAttachments(
   userId: string,
   attachments: MediaAttachment[],
   env: Env
 ): Promise<void> {
   for (const attachment of attachments) {
-    const sent = await sendOneAttachment(userId, attachment, undefined, env);
+    const sent = await trySendAttachmentChecked(userId, attachment, undefined, env);
     if (sent) {
       logger.info('Sent media attachment', {
         kind: attachment.kind,
@@ -392,7 +453,7 @@ async function sendInCaptionMode(
 ): Promise<void> {
   const first = attachments[0];
   if (!first) return;
-  const firstSent = await sendOneAttachment(callback.user_id, first, captionText, env);
+  const firstSent = await trySendAttachmentChecked(callback.user_id, first, captionText, env);
   if (!firstSent) {
     logger.warn('First media send failed, falling back to text', {
       kind: first.kind,

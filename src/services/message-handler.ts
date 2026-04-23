@@ -16,12 +16,17 @@ import {
   sendTypingIndicator,
   sendAudioMessage,
   sendAudioFromBuffer,
+  sendImageMessage,
+  sendVideoMessage,
   downloadMedia,
 } from './meta-api/client';
+import { extractMedia } from './media-extractor';
+import type { MediaAttachment } from './media-extractor';
 import { sendMessage as sendToEngine } from './engine-client';
 import type { AudioPayload, SendMessageOptions } from './engine-client';
 import { chunkMessage } from './chunking';
 import { logger } from '../utils/logger';
+import { redactUrl } from '../utils/url';
 
 /**
  * Parse a raw message from Meta webhook into IncomingMessage.
@@ -288,16 +293,6 @@ export function validateEngineCallback(payload: unknown): string | null {
   return validateCallbackFields(p.type as string, p);
 }
 
-function redactUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    parsed.search = '';
-    return parsed.toString();
-  } catch {
-    return '<invalid-url>';
-  }
-}
-
 async function fetchAudioFromUrl(url: string, env: Env): Promise<ArrayBuffer | null> {
   const safeUrl = redactUrl(url);
   if (!url.startsWith('https://')) {
@@ -352,12 +347,68 @@ async function tryAudioDelivery(callback: EngineCallback, env: Env): Promise<boo
   return false;
 }
 
+async function sendOneAttachment(
+  userId: string,
+  attachment: MediaAttachment,
+  caption: string | undefined,
+  env: Env
+): Promise<boolean> {
+  if (attachment.kind === 'image') {
+    return sendImageMessage(userId, attachment.url, caption, env);
+  }
+  return sendVideoMessage(userId, attachment.url, caption, env);
+}
+
+async function trySendAttachments(
+  userId: string,
+  attachments: MediaAttachment[],
+  caption: string,
+  env: Env
+): Promise<boolean> {
+  for (let i = 0; i < attachments.length; i += 1) {
+    const attachment = attachments[i];
+    if (!attachment) continue;
+    const thisCaption = i === 0 && caption.length > 0 ? caption : undefined;
+    const sent = await sendOneAttachment(userId, attachment, thisCaption, env);
+    if (!sent) {
+      logger.warn('Media send failed, falling back to text', {
+        kind: attachment.kind,
+        url: redactUrl(attachment.url),
+      });
+      return false;
+    }
+    logger.info('Sent media attachment', {
+      kind: attachment.kind,
+      url: redactUrl(attachment.url),
+    });
+  }
+  return true;
+}
+
+async function handleTextWithMedia(callback: EngineCallback, env: Env): Promise<void> {
+  if (!callback.text) return;
+  const { attachments, captionText, captionTruncated } = extractMedia(callback.text);
+  if (attachments.length === 0) {
+    await sendResponses(callback.user_id, [callback.text], env);
+    return;
+  }
+  if (captionTruncated) {
+    logger.warn('Caption truncated to WhatsApp limit', {
+      attachmentCount: attachments.length,
+    });
+  }
+  const ok = await trySendAttachments(callback.user_id, attachments, captionText, env);
+  if (!ok) {
+    await sendResponses(callback.user_id, [callback.text], env);
+  }
+}
+
 async function handleCompleteCallback(callback: EngineCallback, env: Env): Promise<void> {
   const audioSent = await tryAudioDelivery(callback, env);
   if (audioSent) return;
 
   if (callback.text) {
-    await sendResponses(callback.user_id, [callback.text], env);
+    await handleTextWithMedia(callback, env);
   } else {
     logger.error('Audio delivery failed with no text fallback');
     await sendToWhatsApp(

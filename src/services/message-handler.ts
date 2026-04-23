@@ -393,17 +393,26 @@ async function sendInCaptionMode(
 ): Promise<void> {
   const first = attachments[0];
   if (!first) return;
-  const firstSent = await sendOneAttachment(callback.user_id, first, captionText, env);
-  if (!firstSent) {
-    logger.warn('First media send failed, falling back to text', {
-      kind: first.kind,
-      url: redactUrl(first.url),
-    });
-    await sendResponses(callback.user_id, [callback.text ?? ''], env);
+  if (attachments.length === 1) {
+    const sent = await sendOneAttachment(callback.user_id, first, captionText, env);
+    if (!sent) {
+      logger.warn('First media send failed, falling back to text', {
+        kind: first.kind,
+        url: redactUrl(first.url),
+      });
+      await sendResponses(callback.user_id, [callback.text ?? ''], env);
+      return;
+    }
+    logger.info('Sent media attachment', { kind: first.kind, url: redactUrl(first.url) });
     return;
   }
-  logger.info('Sent media attachment', { kind: first.kind, url: redactUrl(first.url) });
-  await sendRemainingAttachments(callback.user_id, attachments.slice(1), env);
+  // N > 1: putting the prose-caption on attachment #1 only (the previous
+  // behavior) leaves attachments #2..N context-less. Send the caption as a
+  // standalone text message first, then ship every attachment captionless.
+  if (captionText.length > 0) {
+    await sendResponses(callback.user_id, [captionText], env);
+  }
+  await sendRemainingAttachments(callback.user_id, attachments, env);
 }
 
 async function sendInLongTextMode(

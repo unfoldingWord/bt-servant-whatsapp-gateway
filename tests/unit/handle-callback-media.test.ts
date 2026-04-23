@@ -77,24 +77,48 @@ describe('handleEngineCallback with inline media', () => {
     });
   });
 
-  it('sends two media messages with caption on first only when text wraps two URLs', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: true });
+  it('sends caption as standalone leading text + all attachments captionless when text wraps two URLs', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true });
 
     const text =
       'Two things:\n![A](https://cdn.example.com/a.jpg)\n[B](https://cdn.example.com/b.mp4)\nDone.';
     await handleEngineCallback(baseCallback(text), mockEnv);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
 
-    const first = lastCallBody(fetchMock, 0);
-    expect(first.type).toBe('image');
-    expect((first.image as Record<string, unknown>).caption).toBe(
+    const leading = lastCallBody(fetchMock, 0);
+    expect(leading.type).toBe('text');
+    expect((leading.text as Record<string, unknown>).body).toBe(
       'Two things:\nhttps://cdn.example.com/a.jpg\nhttps://cdn.example.com/b.mp4\nDone.'
     );
 
     const second = lastCallBody(fetchMock, 1);
-    expect(second.type).toBe('video');
-    expect((second.video as Record<string, unknown>).caption).toBeUndefined();
+    expect(second.type).toBe('image');
+    expect((second.image as Record<string, unknown>).caption).toBeUndefined();
+
+    const third = lastCallBody(fetchMock, 2);
+    expect(third.type).toBe('video');
+    expect((third.video as Record<string, unknown>).caption).toBeUndefined();
+  });
+
+  it('leading text body is exactly the two URLs when multi-attachment input has no surrounding prose', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true });
+
+    const text = '![](https://cdn.example.com/a.jpg) ![](https://cdn.example.com/b.jpg)';
+    await handleEngineCallback(baseCallback(text), mockEnv);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const leading = lastCallBody(fetchMock, 0);
+    expect(leading.type).toBe('text');
+    expect((leading.text as Record<string, unknown>).body).toBe(
+      'https://cdn.example.com/a.jpg https://cdn.example.com/b.jpg'
+    );
   });
 
   it('falls back to original text when the first (caption-bearing) media fails', async () => {
@@ -112,11 +136,11 @@ describe('handleEngineCallback with inline media', () => {
   });
 
   it('sends the URL as text when a later media fails, so the asset is not lost', async () => {
-    // First media succeeds with caption (which already contains both URLs as
-    // silent-drop fallback). Second media fails — we still send its URL as
-    // plain text. Redundant with the caption today, but cheap insurance for
-    // long-text mode where captions are not on the media itself.
+    // Multi-attachment flow: leading text (caption), image #1 (ok), video #2
+    // (fail), then the failed video's URL retried as plain text via
+    // sendRemainingAttachments fallback.
     fetchMock
+      .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'Server Error' })
       .mockResolvedValueOnce({ ok: true });
@@ -125,23 +149,28 @@ describe('handleEngineCallback with inline media', () => {
       'Two things:\n![A](https://cdn.example.com/a.jpg)\n[B](https://cdn.example.com/b.mp4)\nDone.';
     await handleEngineCallback(baseCallback(text), mockEnv);
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
 
-    // First: image with caption (both URLs preserved in caption).
-    const first = lastCallBody(fetchMock, 0);
-    expect(first.type).toBe('image');
-    expect((first.image as Record<string, unknown>).caption).toBe(
+    // 1st: leading text with the full caption (both URLs preserved).
+    const leading = lastCallBody(fetchMock, 0);
+    expect(leading.type).toBe('text');
+    expect((leading.text as Record<string, unknown>).body).toBe(
       'Two things:\nhttps://cdn.example.com/a.jpg\nhttps://cdn.example.com/b.mp4\nDone.'
     );
 
-    // Second: failed video attempt.
-    const second = lastCallBody(fetchMock, 1);
-    expect(second.type).toBe('video');
+    // 2nd: image #1, captionless, ok.
+    const image = lastCallBody(fetchMock, 1);
+    expect(image.type).toBe('image');
+    expect((image.image as Record<string, unknown>).caption).toBeUndefined();
 
-    // Third: the URL of the failed media, sent as plain text.
-    const third = lastCallBody(fetchMock, 2);
-    expect(third.type).toBe('text');
-    expect((third.text as Record<string, unknown>).body).toBe('https://cdn.example.com/b.mp4');
+    // 3rd: failed video #2.
+    const failedVideo = lastCallBody(fetchMock, 2);
+    expect(failedVideo.type).toBe('video');
+
+    // 4th: the URL of the failed media, sent as plain text.
+    const fallback = lastCallBody(fetchMock, 3);
+    expect(fallback.type).toBe('text');
+    expect((fallback.text as Record<string, unknown>).body).toBe('https://cdn.example.com/b.mp4');
   });
 
   it('sends media captionless and full text (URL included) separately when caption exceeds 1024 chars', async () => {

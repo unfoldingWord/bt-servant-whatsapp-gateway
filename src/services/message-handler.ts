@@ -393,17 +393,36 @@ async function sendInCaptionMode(
 ): Promise<void> {
   const first = attachments[0];
   if (!first) return;
-  const firstSent = await sendOneAttachment(callback.user_id, first, captionText, env);
-  if (!firstSent) {
-    logger.warn('First media send failed, falling back to text', {
-      kind: first.kind,
-      url: redactUrl(first.url),
-    });
-    await sendResponses(callback.user_id, [callback.text ?? ''], env);
+  if (attachments.length === 1) {
+    const sent = await sendOneAttachment(callback.user_id, first, captionText, env);
+    if (!sent) {
+      logger.warn('First media send failed, falling back to text', {
+        kind: first.kind,
+        url: redactUrl(first.url),
+      });
+      await sendResponses(callback.user_id, [callback.text ?? ''], env);
+      return;
+    }
+    logger.info('Sent media attachment', { kind: first.kind, url: redactUrl(first.url) });
     return;
   }
-  logger.info('Sent media attachment', { kind: first.kind, url: redactUrl(first.url) });
-  await sendRemainingAttachments(callback.user_id, attachments.slice(1), env);
+  // N > 1: putting the prose-caption on attachment #1 only (the previous
+  // behavior) leaves attachments #2..N context-less. Send the caption as a
+  // standalone text message first, then ship every attachment captionless.
+  // The leading-text send is intentionally non-fatal: /progress-callback has
+  // already returned 200, so a thrown error here drops the entire batch with
+  // no engine retry. Better to deliver the attachments without the preamble
+  // than to silently lose the whole response.
+  if (captionText.length > 0) {
+    try {
+      await sendResponses(callback.user_id, [captionText], env);
+    } catch (err) {
+      logger.warn('Leading caption text send failed; delivering attachments without preamble', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  await sendRemainingAttachments(callback.user_id, attachments, env);
 }
 
 async function sendInLongTextMode(

@@ -14,11 +14,11 @@ export interface MediaAttachment {
 
 export interface ExtractionResult {
   attachments: MediaAttachment[];
+  /** Original text with matched URLs removed and whitespace collapsed. Not truncated. */
   captionText: string;
-  captionTruncated: boolean;
 }
 
-/** WhatsApp caption length cap. */
+/** WhatsApp caption length cap. Callers decide how to honor it. */
 export const MAX_CAPTION_LENGTH = 1024;
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif']);
@@ -69,20 +69,12 @@ function collapseWhitespace(text: string): string {
     .trim();
 }
 
-function truncateCaption(text: string): { caption: string; truncated: boolean } {
-  if (text.length <= MAX_CAPTION_LENGTH) {
-    return { caption: text, truncated: false };
-  }
-  return { caption: text.slice(0, MAX_CAPTION_LENGTH - 1) + '…', truncated: true };
-}
-
 export function extractMedia(text: string): ExtractionResult {
   const attachments = findAttachments(text);
   if (attachments.length === 0) {
-    return { attachments: [], captionText: text, captionTruncated: false };
+    return { attachments: [], captionText: text };
   }
   const urls = attachments.map((a) => a.url);
-  const stripped = collapseWhitespace(stripUrls(text, urls));
-  const { caption, truncated } = truncateCaption(stripped);
-  return { attachments, captionText: caption, captionTruncated: truncated };
+  const captionText = collapseWhitespace(stripUrls(text, urls));
+  return { attachments, captionText };
 }

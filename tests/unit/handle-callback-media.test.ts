@@ -94,7 +94,7 @@ describe('handleEngineCallback with inline media', () => {
     expect((second.video as Record<string, unknown>).caption).toBeUndefined();
   });
 
-  it('falls back to sending original text when Meta rejects the media', async () => {
+  it('falls back to original text when the first (caption-bearing) media fails', async () => {
     fetchMock
       .mockResolvedValueOnce({ ok: false, status: 400, text: async () => 'Bad Request' })
       .mockResolvedValueOnce({ ok: true });
@@ -106,6 +106,45 @@ describe('handleEngineCallback with inline media', () => {
     const fallback = lastCallBody(fetchMock, 1);
     expect(fallback.type).toBe('text');
     expect((fallback.text as Record<string, unknown>).body).toBe(text);
+  });
+
+  it('does not send text fallback when a later media fails (avoids caption duplication)', async () => {
+    // First succeeds with caption, second fails — user already has the caption,
+    // so sending the original text would duplicate it.
+    fetchMock
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'Server Error' });
+
+    const text = 'Two things:\nhttps://cdn.example.com/a.jpg\nhttps://cdn.example.com/b.mp4\nDone.';
+    await handleEngineCallback(baseCallback(text), mockEnv);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // No third "text" fallback call.
+    for (const call of fetchMock.mock.calls) {
+      const body = JSON.parse(call[1]?.body as string);
+      expect(body.type).not.toBe('text');
+    }
+  });
+
+  it('sends media captionless and full text separately when stripped text exceeds 1024 chars', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: true });
+
+    const filler = 'a'.repeat(1100);
+    const text = `${filler}\n\nhttps://cdn.example.com/pic.jpg\n\ntrailing`;
+    await handleEngineCallback(baseCallback(text), mockEnv);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const mediaCall = lastCallBody(fetchMock, 0);
+    expect(mediaCall.type).toBe('image');
+    expect((mediaCall.image as Record<string, unknown>).caption).toBeUndefined();
+
+    const textCall = lastCallBody(fetchMock, 1);
+    expect(textCall.type).toBe('text');
+    const body = (textCall.text as Record<string, unknown>).body as string;
+    expect(body).toContain(filler);
+    expect(body).toContain('trailing');
+    expect(body).not.toContain('https://cdn.example.com/pic.jpg');
   });
 
   it('uses existing text path when no media URLs are present', async () => {

@@ -20,7 +20,7 @@ import {
   sendVideoMessage,
   downloadMedia,
 } from './meta-api/client';
-import { extractMedia } from './media-extractor';
+import { extractMedia, MAX_CAPTION_LENGTH } from './media-extractor';
 import type { MediaAttachment } from './media-extractor';
 import { sendMessage as sendToEngine } from './engine-client';
 import type { AudioPayload, SendMessageOptions } from './engine-client';
@@ -359,47 +359,72 @@ async function sendOneAttachment(
   return sendVideoMessage(userId, attachment.url, caption, env);
 }
 
-async function trySendAttachments(
+async function sendRemainingAttachments(
   userId: string,
   attachments: MediaAttachment[],
-  caption: string,
   env: Env
-): Promise<boolean> {
-  for (let i = 0; i < attachments.length; i += 1) {
-    const attachment = attachments[i];
-    if (!attachment) continue;
-    const thisCaption = i === 0 && caption.length > 0 ? caption : undefined;
-    const sent = await sendOneAttachment(userId, attachment, thisCaption, env);
-    if (!sent) {
-      logger.warn('Media send failed, falling back to text', {
+): Promise<void> {
+  for (const attachment of attachments) {
+    const sent = await sendOneAttachment(userId, attachment, undefined, env);
+    if (sent) {
+      logger.info('Sent media attachment', {
         kind: attachment.kind,
         url: redactUrl(attachment.url),
       });
-      return false;
+    } else {
+      logger.warn('Media send failed, continuing', {
+        kind: attachment.kind,
+        url: redactUrl(attachment.url),
+      });
     }
-    logger.info('Sent media attachment', {
-      kind: attachment.kind,
-      url: redactUrl(attachment.url),
-    });
   }
-  return true;
+}
+
+async function sendInCaptionMode(
+  callback: EngineCallback,
+  attachments: MediaAttachment[],
+  captionText: string,
+  env: Env
+): Promise<void> {
+  const first = attachments[0];
+  if (!first) return;
+  const firstSent = await sendOneAttachment(callback.user_id, first, captionText, env);
+  if (!firstSent) {
+    logger.warn('First media send failed, falling back to text', {
+      kind: first.kind,
+      url: redactUrl(first.url),
+    });
+    await sendResponses(callback.user_id, [callback.text ?? ''], env);
+    return;
+  }
+  logger.info('Sent media attachment', { kind: first.kind, url: redactUrl(first.url) });
+  await sendRemainingAttachments(callback.user_id, attachments.slice(1), env);
+}
+
+async function sendInLongTextMode(
+  userId: string,
+  attachments: MediaAttachment[],
+  captionText: string,
+  env: Env
+): Promise<void> {
+  await sendRemainingAttachments(userId, attachments, env);
+  if (captionText.length > 0) {
+    await sendResponses(userId, [captionText], env);
+  }
 }
 
 async function handleTextWithMedia(callback: EngineCallback, env: Env): Promise<void> {
   if (!callback.text) return;
-  const { attachments, captionText, captionTruncated } = extractMedia(callback.text);
+  const { attachments, captionText } = extractMedia(callback.text);
   if (attachments.length === 0) {
     await sendResponses(callback.user_id, [callback.text], env);
     return;
   }
-  if (captionTruncated) {
-    logger.warn('Caption truncated to WhatsApp limit', {
-      attachmentCount: attachments.length,
-    });
-  }
-  const ok = await trySendAttachments(callback.user_id, attachments, captionText, env);
-  if (!ok) {
-    await sendResponses(callback.user_id, [callback.text], env);
+  const fitsInCaption = captionText.length > 0 && captionText.length <= MAX_CAPTION_LENGTH;
+  if (fitsInCaption) {
+    await sendInCaptionMode(callback, attachments, captionText, env);
+  } else {
+    await sendInLongTextMode(callback.user_id, attachments, captionText, env);
   }
 }
 

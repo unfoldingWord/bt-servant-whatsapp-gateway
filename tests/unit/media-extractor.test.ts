@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractMedia, MAX_CAPTION_LENGTH } from '../../src/services/media-extractor';
+import { extractMedia } from '../../src/services/media-extractor';
 
 describe('extractMedia', () => {
   it('returns no attachments when text has no URLs', () => {
@@ -7,7 +7,6 @@ describe('extractMedia', () => {
     const result = extractMedia(text);
     expect(result.attachments).toEqual([]);
     expect(result.captionText).toBe(text);
-    expect(result.captionTruncated).toBe(false);
   });
 
   it('extracts a single https jpg URL and strips it from the caption', () => {
@@ -98,13 +97,13 @@ describe('extractMedia', () => {
     expect(result.captionText).toBe('Line 1\n\nLine 2');
   });
 
-  it('truncates captions longer than MAX_CAPTION_LENGTH and flags truncation', () => {
-    const filler = 'a'.repeat(MAX_CAPTION_LENGTH + 500);
+  it('returns the full stripped text without truncation even when very long', () => {
+    const filler = 'a'.repeat(2000);
     const text = `${filler} https://cdn.example.com/img.jpg trailing`;
     const result = extractMedia(text);
-    expect(result.captionTruncated).toBe(true);
-    expect(result.captionText).toHaveLength(MAX_CAPTION_LENGTH);
-    expect(result.captionText.endsWith('…')).toBe(true);
+    expect(result.captionText.length).toBeGreaterThan(1024);
+    expect(result.captionText).toBe(`${filler}  trailing`);
+    expect(result.captionText.endsWith('…')).toBe(false);
   });
 
   it('recognizes webp, gif, png for images', () => {

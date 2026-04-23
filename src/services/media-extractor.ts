@@ -44,10 +44,7 @@ const MEDIA_MARKDOWN_REGEX =
   /!?\[([^\]]*)\]\((https:\/\/[^\s)]+?\.(?:jpg|jpeg|png|webp|gif|mp4|mov|3gp)(?:\?[^\s)]*)?(?:#[^\s)]*)?)\)/gi;
 
 function unwrapMediaMarkdown(text: string): string {
-  return text.replace(MEDIA_MARKDOWN_REGEX, (_match, label: string, url: string) => {
-    const trimmed = label.trim();
-    return trimmed ? `${trimmed} ${url}` : url;
-  });
+  return text.replace(MEDIA_MARKDOWN_REGEX, (_match, _label: string, url: string) => url);
 }
 
 function kindFor(ext: string): MediaKind | null {

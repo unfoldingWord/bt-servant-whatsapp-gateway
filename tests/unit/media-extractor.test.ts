@@ -119,25 +119,37 @@ describe('extractMedia', () => {
     expect(result.attachments.map((a) => a.kind)).toEqual(['video', 'video']);
   });
 
-  it('unwraps `![alt](url.jpg)` markdown image into one attachment with clean caption', () => {
+  it('unwraps `![alt](url.jpg)` markdown image into one attachment, dropping alt text from caption', () => {
     const text =
       "Here's the map:\n![Mount Tabor Map](https://cdn.example.com/map.jpg)\nClick for details.";
     const result = extractMedia(text);
     expect(result.attachments).toEqual([{ kind: 'image', url: 'https://cdn.example.com/map.jpg' }]);
-    expect(result.captionText).toContain('Mount Tabor Map');
+    expect(result.captionText).toBe("Here's the map:\n\nClick for details.");
+    expect(result.captionText).not.toContain('Mount Tabor Map');
     expect(result.captionText).not.toContain('![');
     expect(result.captionText).not.toContain('](');
     expect(result.captionText).not.toContain('https://');
   });
 
-  it('unwraps `[label](url.mp4)` markdown video link into one attachment with clean caption', () => {
+  it('unwraps `[label](url.mp4)` markdown video link into one attachment, dropping label from caption', () => {
     const text = 'Watch this:\n[Fishing Net](https://cdn.example.com/vid.mp4)\nEnjoy!';
     const result = extractMedia(text);
     expect(result.attachments).toEqual([{ kind: 'video', url: 'https://cdn.example.com/vid.mp4' }]);
-    expect(result.captionText).toContain('Fishing Net');
+    expect(result.captionText).toBe('Watch this:\n\nEnjoy!');
+    expect(result.captionText).not.toContain('Fishing Net');
     expect(result.captionText).not.toContain('[');
     expect(result.captionText).not.toContain('](');
     expect(result.captionText).not.toContain('https://');
+  });
+
+  it('does not double the label when worker pre-labels image in prose', () => {
+    const text = 'Bread:\n![Bread](https://cdn.example.com/bread.jpg)\n\nMore prose.';
+    const result = extractMedia(text);
+    expect(result.attachments).toEqual([
+      { kind: 'image', url: 'https://cdn.example.com/bread.jpg' },
+    ]);
+    expect(result.captionText).toBe('Bread:\n\nMore prose.');
+    expect(result.captionText).not.toMatch(/Bread\s+Bread/);
   });
 
   it('unwraps `![](url.jpg)` with empty alt to just the URL — caption has no stray brackets or whitespace', () => {
@@ -164,7 +176,7 @@ describe('extractMedia', () => {
     expect(result.attachments).toEqual([{ kind: 'video', url: 'https://cdn.example.com/vid.mp4' }]);
   });
 
-  it('extracts both a markdown-wrapped media link and a bare URL in order', () => {
+  it('extracts both a markdown-wrapped media link and a bare URL in order, dropping alt from caption', () => {
     const text =
       'First ![Map](https://cdn.example.com/a.jpg) then bare https://cdn.example.com/b.mp4 done.';
     const result = extractMedia(text);
@@ -172,9 +184,9 @@ describe('extractMedia', () => {
       { kind: 'image', url: 'https://cdn.example.com/a.jpg' },
       { kind: 'video', url: 'https://cdn.example.com/b.mp4' },
     ]);
-    expect(result.captionText).toContain('Map');
     expect(result.captionText).toContain('First');
     expect(result.captionText).toContain('done.');
+    expect(result.captionText).not.toContain('Map');
     expect(result.captionText).not.toContain('![');
     expect(result.captionText).not.toContain('](');
     expect(result.captionText).not.toContain('https://');

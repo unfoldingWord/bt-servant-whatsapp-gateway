@@ -120,11 +120,10 @@ describe('extractMedia', () => {
   });
 
   it('unwraps `![alt](url.jpg)` markdown image into one attachment with clean caption', () => {
-    const text = "Here's the map:\n![Mount Tabor Map](https://cdn.example.com/map.jpg)\nClick for details.";
+    const text =
+      "Here's the map:\n![Mount Tabor Map](https://cdn.example.com/map.jpg)\nClick for details.";
     const result = extractMedia(text);
-    expect(result.attachments).toEqual([
-      { kind: 'image', url: 'https://cdn.example.com/map.jpg' },
-    ]);
+    expect(result.attachments).toEqual([{ kind: 'image', url: 'https://cdn.example.com/map.jpg' }]);
     expect(result.captionText).toContain('Mount Tabor Map');
     expect(result.captionText).not.toContain('![');
     expect(result.captionText).not.toContain('](');
@@ -134,9 +133,7 @@ describe('extractMedia', () => {
   it('unwraps `[label](url.mp4)` markdown video link into one attachment with clean caption', () => {
     const text = 'Watch this:\n[Fishing Net](https://cdn.example.com/vid.mp4)\nEnjoy!';
     const result = extractMedia(text);
-    expect(result.attachments).toEqual([
-      { kind: 'video', url: 'https://cdn.example.com/vid.mp4' },
-    ]);
+    expect(result.attachments).toEqual([{ kind: 'video', url: 'https://cdn.example.com/vid.mp4' }]);
     expect(result.captionText).toContain('Fishing Net');
     expect(result.captionText).not.toContain('[');
     expect(result.captionText).not.toContain('](');
@@ -164,9 +161,7 @@ describe('extractMedia', () => {
   it('classifies by URL extension even when prefix mismatches (`![alt](vid.mp4)` is video)', () => {
     const text = '![odd](https://cdn.example.com/vid.mp4)';
     const result = extractMedia(text);
-    expect(result.attachments).toEqual([
-      { kind: 'video', url: 'https://cdn.example.com/vid.mp4' },
-    ]);
+    expect(result.attachments).toEqual([{ kind: 'video', url: 'https://cdn.example.com/vid.mp4' }]);
   });
 
   it('extracts both a markdown-wrapped media link and a bare URL in order', () => {

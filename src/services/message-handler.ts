@@ -409,8 +409,18 @@ async function sendInCaptionMode(
   // N > 1: putting the prose-caption on attachment #1 only (the previous
   // behavior) leaves attachments #2..N context-less. Send the caption as a
   // standalone text message first, then ship every attachment captionless.
+  // The leading-text send is intentionally non-fatal: /progress-callback has
+  // already returned 200, so a thrown error here drops the entire batch with
+  // no engine retry. Better to deliver the attachments without the preamble
+  // than to silently lose the whole response.
   if (captionText.length > 0) {
-    await sendResponses(callback.user_id, [captionText], env);
+    try {
+      await sendResponses(callback.user_id, [captionText], env);
+    } catch (err) {
+      logger.warn('Leading caption text send failed; delivering attachments without preamble', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
   await sendRemainingAttachments(callback.user_id, attachments, env);
 }

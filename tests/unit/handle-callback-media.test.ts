@@ -104,6 +104,37 @@ describe('handleEngineCallback with inline media', () => {
     expect((third.video as Record<string, unknown>).caption).toBeUndefined();
   });
 
+  it('still delivers all attachments when the leading text send fails (multi-attachment)', async () => {
+    // Reliability: /progress-callback returned 200 before this code runs, so a
+    // thrown error from the leading text send would drop the entire batch with
+    // no engine retry. The leading-text send must be non-fatal — attachments
+    // should still ship even if Meta rejected the preamble.
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'Server Error' })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true });
+
+    const text =
+      'Two things:\n![A](https://cdn.example.com/a.jpg)\n[B](https://cdn.example.com/b.mp4)\nDone.';
+    await handleEngineCallback(baseCallback(text), mockEnv);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // 1st attempt: leading text (failed at Meta).
+    const leading = lastCallBody(fetchMock, 0);
+    expect(leading.type).toBe('text');
+
+    // 2nd: image #1, captionless, delivered despite the leading-text failure.
+    const image = lastCallBody(fetchMock, 1);
+    expect(image.type).toBe('image');
+    expect((image.image as Record<string, unknown>).caption).toBeUndefined();
+
+    // 3rd: video #2, captionless, also delivered.
+    const video = lastCallBody(fetchMock, 2);
+    expect(video.type).toBe('video');
+    expect((video.video as Record<string, unknown>).caption).toBeUndefined();
+  });
+
   it('leading text body is exactly the two URLs when multi-attachment input has no surrounding prose', async () => {
     fetchMock
       .mockResolvedValueOnce({ ok: true })

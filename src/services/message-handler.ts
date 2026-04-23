@@ -371,12 +371,16 @@ async function sendRemainingAttachments(
         kind: attachment.kind,
         url: redactUrl(attachment.url),
       });
-    } else {
-      logger.warn('Media send failed, continuing', {
-        kind: attachment.kind,
-        url: redactUrl(attachment.url),
-      });
+      continue;
     }
+    logger.warn('Media send failed, falling back to URL as text', {
+      kind: attachment.kind,
+      url: redactUrl(attachment.url),
+    });
+    // The URL was stripped from the caption/text path, so if the media send
+    // fails the asset would disappear entirely. Send the URL as plain text
+    // so the user still has a clickable link.
+    await sendToWhatsApp(userId, attachment.url, env);
   }
 }
 

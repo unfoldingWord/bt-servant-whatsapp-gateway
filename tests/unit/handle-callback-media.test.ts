@@ -108,22 +108,34 @@ describe('handleEngineCallback with inline media', () => {
     expect((fallback.text as Record<string, unknown>).body).toBe(text);
   });
 
-  it('does not send text fallback when a later media fails (avoids caption duplication)', async () => {
-    // First succeeds with caption, second fails — user already has the caption,
-    // so sending the original text would duplicate it.
+  it('sends the URL as text when a later media fails, so the asset is not lost', async () => {
+    // First succeeds with caption. Second fails — user already has the caption,
+    // but the failed URL was stripped from the caption so we send just the URL
+    // as plain text to preserve the clickable link.
     fetchMock
       .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'Server Error' });
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'Server Error' })
+      .mockResolvedValueOnce({ ok: true });
 
     const text = 'Two things:\nhttps://cdn.example.com/a.jpg\nhttps://cdn.example.com/b.mp4\nDone.';
     await handleEngineCallback(baseCallback(text), mockEnv);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    // No third "text" fallback call.
-    for (const call of fetchMock.mock.calls) {
-      const body = JSON.parse(call[1]?.body as string);
-      expect(body.type).not.toBe('text');
-    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // First: image with caption.
+    const first = lastCallBody(fetchMock, 0);
+    expect(first.type).toBe('image');
+    expect((first.image as Record<string, unknown>).caption).toBe('Two things:\n\nDone.');
+
+    // Second: failed video attempt.
+    const second = lastCallBody(fetchMock, 1);
+    expect(second.type).toBe('video');
+
+    // Third: the URL of the failed media, sent as plain text — NOT the full
+    // original text (which would duplicate the caption).
+    const third = lastCallBody(fetchMock, 2);
+    expect(third.type).toBe('text');
+    expect((third.text as Record<string, unknown>).body).toBe('https://cdn.example.com/b.mp4');
   });
 
   it('sends media captionless and full text separately when stripped text exceeds 1024 chars', async () => {

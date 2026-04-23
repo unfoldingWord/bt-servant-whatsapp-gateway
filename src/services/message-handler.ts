@@ -16,12 +16,17 @@ import {
   sendTypingIndicator,
   sendAudioMessage,
   sendAudioFromBuffer,
+  sendImageMessage,
+  sendVideoMessage,
   downloadMedia,
 } from './meta-api/client';
+import { extractMedia, MAX_CAPTION_LENGTH } from './media-extractor';
+import type { MediaAttachment } from './media-extractor';
 import { sendMessage as sendToEngine } from './engine-client';
 import type { AudioPayload, SendMessageOptions } from './engine-client';
 import { chunkMessage } from './chunking';
 import { logger } from '../utils/logger';
+import { redactUrl } from '../utils/url';
 
 /**
  * Parse a raw message from Meta webhook into IncomingMessage.
@@ -288,16 +293,6 @@ export function validateEngineCallback(payload: unknown): string | null {
   return validateCallbackFields(p.type as string, p);
 }
 
-function redactUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    parsed.search = '';
-    return parsed.toString();
-  } catch {
-    return '<invalid-url>';
-  }
-}
-
 async function fetchAudioFromUrl(url: string, env: Env): Promise<ArrayBuffer | null> {
   const safeUrl = redactUrl(url);
   if (!url.startsWith('https://')) {
@@ -352,12 +347,97 @@ async function tryAudioDelivery(callback: EngineCallback, env: Env): Promise<boo
   return false;
 }
 
+async function sendOneAttachment(
+  userId: string,
+  attachment: MediaAttachment,
+  caption: string | undefined,
+  env: Env
+): Promise<boolean> {
+  if (attachment.kind === 'image') {
+    return sendImageMessage(userId, attachment.url, caption, env);
+  }
+  return sendVideoMessage(userId, attachment.url, caption, env);
+}
+
+async function sendRemainingAttachments(
+  userId: string,
+  attachments: MediaAttachment[],
+  env: Env
+): Promise<void> {
+  for (const attachment of attachments) {
+    const sent = await sendOneAttachment(userId, attachment, undefined, env);
+    if (sent) {
+      logger.info('Sent media attachment', {
+        kind: attachment.kind,
+        url: redactUrl(attachment.url),
+      });
+      continue;
+    }
+    logger.warn('Media send failed, falling back to URL as text', {
+      kind: attachment.kind,
+      url: redactUrl(attachment.url),
+    });
+    // The URL was stripped from the caption/text path, so if the media send
+    // fails the asset would disappear entirely. Send the URL as plain text
+    // so the user still has a clickable link.
+    await sendToWhatsApp(userId, attachment.url, env);
+  }
+}
+
+async function sendInCaptionMode(
+  callback: EngineCallback,
+  attachments: MediaAttachment[],
+  captionText: string,
+  env: Env
+): Promise<void> {
+  const first = attachments[0];
+  if (!first) return;
+  const firstSent = await sendOneAttachment(callback.user_id, first, captionText, env);
+  if (!firstSent) {
+    logger.warn('First media send failed, falling back to text', {
+      kind: first.kind,
+      url: redactUrl(first.url),
+    });
+    await sendResponses(callback.user_id, [callback.text ?? ''], env);
+    return;
+  }
+  logger.info('Sent media attachment', { kind: first.kind, url: redactUrl(first.url) });
+  await sendRemainingAttachments(callback.user_id, attachments.slice(1), env);
+}
+
+async function sendInLongTextMode(
+  userId: string,
+  attachments: MediaAttachment[],
+  captionText: string,
+  env: Env
+): Promise<void> {
+  await sendRemainingAttachments(userId, attachments, env);
+  if (captionText.length > 0) {
+    await sendResponses(userId, [captionText], env);
+  }
+}
+
+async function handleTextWithMedia(callback: EngineCallback, env: Env): Promise<void> {
+  if (!callback.text) return;
+  const { attachments, captionText } = extractMedia(callback.text);
+  if (attachments.length === 0) {
+    await sendResponses(callback.user_id, [callback.text], env);
+    return;
+  }
+  const fitsInCaption = captionText.length > 0 && captionText.length <= MAX_CAPTION_LENGTH;
+  if (fitsInCaption) {
+    await sendInCaptionMode(callback, attachments, captionText, env);
+  } else {
+    await sendInLongTextMode(callback.user_id, attachments, captionText, env);
+  }
+}
+
 async function handleCompleteCallback(callback: EngineCallback, env: Env): Promise<void> {
   const audioSent = await tryAudioDelivery(callback, env);
   if (audioSent) return;
 
   if (callback.text) {
-    await sendResponses(callback.user_id, [callback.text], env);
+    await handleTextWithMedia(callback, env);
   } else {
     logger.error('Audio delivery failed with no text fallback');
     await sendToWhatsApp(

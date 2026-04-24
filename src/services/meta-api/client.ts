@@ -105,21 +105,16 @@ function buildMediaPayload(
 
 /**
  * Classify a parsed Meta /messages response body. Returns `false` if the body
- * indicates a permanent failure (we should fall back), `true` otherwise.
- * Transient codes log at warn-level but resolve to `true` — Meta retries
- * internally and falling back would just hit the same throttle.
+ * indicates failure (we should fall back), `true` otherwise.
+ *
+ * Fail-closed on unknown codes: any `error.code` present in a 2xx body that
+ * isn't explicitly classified as transient triggers the fallback path. Meta
+ * can add new permanent-failure codes without notice; biasing toward success
+ * reintroduces the silent-drop path this module is built to close.
  */
 function classifyMetaBody(body: MetaSendResponse | undefined, kind: MediaKind): boolean {
   const errorCode = body?.error?.code;
   if (typeof errorCode === 'number') {
-    if (isPermanentFailure(errorCode)) {
-      logger.error('Meta media send returned permanent error in 2xx body', {
-        kind,
-        errorCode,
-        body,
-      });
-      return false;
-    }
     if (isTransientFailure(errorCode)) {
       logger.warn('Meta media send returned transient error in 2xx body', {
         kind,
@@ -128,11 +123,14 @@ function classifyMetaBody(body: MetaSendResponse | undefined, kind: MediaKind): 
       });
       return true;
     }
-    logger.warn('Meta media send returned unknown error code in 2xx body', {
+    const classification = isPermanentFailure(errorCode) ? 'permanent' : 'unclassified';
+    logger.error('Meta media send returned error in 2xx body, treating as failure', {
       kind,
       errorCode,
+      classification,
       body,
     });
+    return false;
   }
   if (body?.messages?.[0]?.message_status === 'failed') {
     logger.error('Meta media send reported message_status:failed', { kind, body });

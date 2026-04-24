@@ -182,6 +182,26 @@ describe('media send helpers', () => {
       expect(result).toBe(false);
     });
 
+    it('returns false when 200 body has an unknown error code (fail-closed)', async () => {
+      // Meta can add new permanent-failure codes without notice. Unknown codes
+      // in a 2xx body should trigger the fallback path rather than bias to
+      // success — better to over-fall-back than silently lose media.
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          error: { code: 999999, message: 'some new permanent failure' },
+        }),
+      });
+
+      const result = await sendImageMessage(
+        '1234567890',
+        'https://cdn.example.com/a.jpg',
+        undefined,
+        mockEnv
+      );
+      expect(result).toBe(false);
+    });
+
     it('returns true when 200 body has a transient error code (131000)', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: true,

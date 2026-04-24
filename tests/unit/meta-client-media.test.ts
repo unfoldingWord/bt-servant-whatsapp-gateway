@@ -18,6 +18,13 @@ const mockEnv: Env = {
   GATEWAY_PUBLIC_URL: 'https://gateway.example.com',
 };
 
+function metaOk(wamid = 'wamid.test'): {
+  ok: true;
+  json: () => Promise<{ messages: { id: string }[] }>;
+} {
+  return { ok: true, json: async () => ({ messages: [{ id: wamid }] }) };
+}
+
 describe('media send helpers', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   const originalFetch = globalThis.fetch;
@@ -33,7 +40,7 @@ describe('media send helpers', () => {
 
   describe('sendImageMessage', () => {
     it('posts type:image with link and caption', async () => {
-      fetchMock.mockResolvedValueOnce({ ok: true });
+      fetchMock.mockResolvedValueOnce(metaOk());
 
       const result = await sendImageMessage(
         '1234567890',
@@ -58,7 +65,7 @@ describe('media send helpers', () => {
     });
 
     it('omits caption when undefined', async () => {
-      fetchMock.mockResolvedValueOnce({ ok: true });
+      fetchMock.mockResolvedValueOnce(metaOk());
 
       await sendImageMessage('1234567890', 'https://cdn.example.com/a.jpg', undefined, mockEnv);
 
@@ -68,7 +75,7 @@ describe('media send helpers', () => {
     });
 
     it('omits caption when empty string', async () => {
-      fetchMock.mockResolvedValueOnce({ ok: true });
+      fetchMock.mockResolvedValueOnce(metaOk());
 
       await sendImageMessage('1234567890', 'https://cdn.example.com/a.jpg', '', mockEnv);
 
@@ -95,7 +102,7 @@ describe('media send helpers', () => {
 
   describe('sendVideoMessage', () => {
     it('posts type:video with link and caption', async () => {
-      fetchMock.mockResolvedValueOnce({ ok: true });
+      fetchMock.mockResolvedValueOnce(metaOk());
 
       const result = await sendVideoMessage(
         '1234567890',
@@ -131,12 +138,117 @@ describe('media send helpers', () => {
     });
 
     it('sends Bearer auth header', async () => {
-      fetchMock.mockResolvedValueOnce({ ok: true });
+      fetchMock.mockResolvedValueOnce(metaOk());
 
       await sendVideoMessage('1234567890', 'https://cdn.example.com/a.mp4', undefined, mockEnv);
 
       const init = fetchMock.mock.calls[0][1];
       expect(init?.headers?.Authorization).toBe('Bearer test-whatsapp-token');
+    });
+  });
+
+  describe('embedded-error 200 responses (Piece 1)', () => {
+    it('returns false when 200 body has a permanent error code (131052)', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          error: { code: 131052, message: 'Media download error' },
+        }),
+      });
+
+      const result = await sendImageMessage(
+        '1234567890',
+        'https://cdn.example.com/a.jpg',
+        undefined,
+        mockEnv
+      );
+      expect(result).toBe(false);
+    });
+
+    it('returns false when 200 body has a permanent error code (131053)', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          error: { code: 131053, message: 'Media upload error' },
+        }),
+      });
+
+      const result = await sendVideoMessage(
+        '1234567890',
+        'https://cdn.example.com/big.mp4',
+        undefined,
+        mockEnv
+      );
+      expect(result).toBe(false);
+    });
+
+    it('returns false when 200 body has an unknown error code (fail-closed)', async () => {
+      // Meta can add new permanent-failure codes without notice. Unknown codes
+      // in a 2xx body should trigger the fallback path rather than bias to
+      // success — better to over-fall-back than silently lose media.
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          error: { code: 999999, message: 'some new permanent failure' },
+        }),
+      });
+
+      const result = await sendImageMessage(
+        '1234567890',
+        'https://cdn.example.com/a.jpg',
+        undefined,
+        mockEnv
+      );
+      expect(result).toBe(false);
+    });
+
+    it('returns true when 200 body has a transient error code (131000)', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          error: { code: 131000, message: 'Something went wrong' },
+        }),
+      });
+
+      const result = await sendImageMessage(
+        '1234567890',
+        'https://cdn.example.com/a.jpg',
+        undefined,
+        mockEnv
+      );
+      expect(result).toBe(true);
+    });
+
+    it('returns false when messages[0].message_status === "failed"', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ messages: [{ id: 'wamid.x', message_status: 'failed' }] }),
+      });
+
+      const result = await sendImageMessage(
+        '1234567890',
+        'https://cdn.example.com/a.jpg',
+        undefined,
+        mockEnv
+      );
+      expect(result).toBe(false);
+    });
+
+    it('returns true when JSON body is unparseable but status is 2xx', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => {
+          throw new Error('not JSON');
+        },
+      });
+
+      const result = await sendImageMessage(
+        '1234567890',
+        'https://cdn.example.com/a.jpg',
+        undefined,
+        mockEnv
+      );
+      expect(result).toBe(true);
     });
   });
 });

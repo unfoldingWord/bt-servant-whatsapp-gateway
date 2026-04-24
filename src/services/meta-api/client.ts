@@ -4,6 +4,13 @@
 
 import type { Env } from '../../config/types';
 import { logger } from '../../utils/logger';
+import { isPermanentFailure, isTransientFailure } from './error-codes';
+
+/** Shape of a Meta /messages response body we care about. */
+interface MetaSendResponse {
+  error?: { code?: number; message?: string };
+  messages?: Array<{ id?: string; message_status?: string }>;
+}
 
 /** Graph API version to use */
 const META_API_VERSION = 'v23.0';
@@ -96,6 +103,42 @@ function buildMediaPayload(
   };
 }
 
+/**
+ * Classify a parsed Meta /messages response body. Returns `false` if the body
+ * indicates failure (we should fall back), `true` otherwise.
+ *
+ * Fail-closed on unknown codes: any `error.code` present in a 2xx body that
+ * isn't explicitly classified as transient triggers the fallback path. Meta
+ * can add new permanent-failure codes without notice; biasing toward success
+ * reintroduces the silent-drop path this module is built to close.
+ */
+function classifyMetaBody(body: MetaSendResponse | undefined, kind: MediaKind): boolean {
+  const errorCode = body?.error?.code;
+  if (typeof errorCode === 'number') {
+    if (isTransientFailure(errorCode)) {
+      logger.warn('Meta media send returned transient error in 2xx body', {
+        kind,
+        errorCode,
+        body,
+      });
+      return true;
+    }
+    const classification = isPermanentFailure(errorCode) ? 'permanent' : 'unclassified';
+    logger.error('Meta media send returned error in 2xx body, treating as failure', {
+      kind,
+      errorCode,
+      classification,
+      body,
+    });
+    return false;
+  }
+  if (body?.messages?.[0]?.message_status === 'failed') {
+    logger.error('Meta media send reported message_status:failed', { kind, body });
+    return false;
+  }
+  return true;
+}
+
 async function sendMediaByLink(
   to: string,
   kind: MediaKind,
@@ -112,15 +155,24 @@ async function sendMediaByLink(
     body: JSON.stringify(payload),
   });
 
+  // Always read the body — Meta sometimes returns 200 with an embedded error.
+  let body: MetaSendResponse | undefined;
+  try {
+    body = (await response.json()) as MetaSendResponse;
+  } catch {
+    body = undefined;
+  }
+
   if (!response.ok) {
-    const errorText = await response.text();
     logger.error('Failed to send Meta media message', {
       status: response.status,
       kind,
-      error: errorText,
+      body,
     });
     return false;
   }
+
+  if (!classifyMetaBody(body, kind)) return false;
 
   logger.info(`Sent ${kind} message to user`, { to: to.slice(0, 8) + '...' });
   return true;

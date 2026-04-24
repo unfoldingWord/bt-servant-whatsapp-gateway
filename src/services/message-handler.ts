@@ -20,7 +20,7 @@ import {
   sendVideoMessage,
   downloadMedia,
 } from './meta-api/client';
-import { extractMedia, MAX_CAPTION_LENGTH } from './media-extractor';
+import { extractMedia } from './media-extractor';
 import type { MediaAttachment } from './media-extractor';
 import { sendMessage as sendToEngine } from './engine-client';
 import type { AudioPayload, SendMessageOptions } from './engine-client';
@@ -350,13 +350,12 @@ async function tryAudioDelivery(callback: EngineCallback, env: Env): Promise<boo
 async function sendOneAttachment(
   userId: string,
   attachment: MediaAttachment,
-  caption: string | undefined,
   env: Env
 ): Promise<boolean> {
   if (attachment.kind === 'image') {
-    return sendImageMessage(userId, attachment.url, caption, env);
+    return sendImageMessage(userId, attachment.url, undefined, env);
   }
-  return sendVideoMessage(userId, attachment.url, caption, env);
+  return sendVideoMessage(userId, attachment.url, undefined, env);
 }
 
 async function sendRemainingAttachments(
@@ -365,7 +364,7 @@ async function sendRemainingAttachments(
   env: Env
 ): Promise<void> {
   for (const attachment of attachments) {
-    const sent = await sendOneAttachment(userId, attachment, undefined, env);
+    const sent = await sendOneAttachment(userId, attachment, env);
     if (sent) {
       logger.info('Sent media attachment', {
         kind: attachment.kind,
@@ -385,34 +384,18 @@ async function sendRemainingAttachments(
   }
 }
 
-async function sendInCaptionMode(
-  callback: EngineCallback,
-  attachments: MediaAttachment[],
-  captionText: string,
-  env: Env
-): Promise<void> {
-  const first = attachments[0];
-  if (!first) return;
-  if (attachments.length === 1) {
-    const sent = await sendOneAttachment(callback.user_id, first, captionText, env);
-    if (!sent) {
-      logger.warn('First media send failed, falling back to text', {
-        kind: first.kind,
-        url: redactUrl(first.url),
-      });
-      await sendResponses(callback.user_id, [callback.text ?? ''], env);
-      return;
-    }
-    logger.info('Sent media attachment', { kind: first.kind, url: redactUrl(first.url) });
+async function handleTextWithMedia(callback: EngineCallback, env: Env): Promise<void> {
+  if (!callback.text) return;
+  const { attachments, captionText } = extractMedia(callback.text);
+  if (attachments.length === 0) {
+    await sendResponses(callback.user_id, [callback.text], env);
     return;
   }
-  // N > 1: putting the prose-caption on attachment #1 only (the previous
-  // behavior) leaves attachments #2..N context-less. Send the caption as a
-  // standalone text message first, then ship every attachment captionless.
-  // The leading-text send is intentionally non-fatal: /progress-callback has
-  // already returned 200, so a thrown error here drops the entire batch with
-  // no engine retry. Better to deliver the attachments without the preamble
-  // than to silently lose the whole response.
+  // Always send the prose (with URLs preserved inline) first, then attempt
+  // each inline media as a "bonus." If an inline embed silently fails, the
+  // user still has the URL in the leading text and can click it. The leading
+  // send is non-fatal: /progress-callback has already returned 200, so a
+  // thrown error here would drop the whole batch with no engine retry.
   if (captionText.length > 0) {
     try {
       await sendResponses(callback.user_id, [captionText], env);
@@ -423,33 +406,6 @@ async function sendInCaptionMode(
     }
   }
   await sendRemainingAttachments(callback.user_id, attachments, env);
-}
-
-async function sendInLongTextMode(
-  userId: string,
-  attachments: MediaAttachment[],
-  captionText: string,
-  env: Env
-): Promise<void> {
-  await sendRemainingAttachments(userId, attachments, env);
-  if (captionText.length > 0) {
-    await sendResponses(userId, [captionText], env);
-  }
-}
-
-async function handleTextWithMedia(callback: EngineCallback, env: Env): Promise<void> {
-  if (!callback.text) return;
-  const { attachments, captionText } = extractMedia(callback.text);
-  if (attachments.length === 0) {
-    await sendResponses(callback.user_id, [callback.text], env);
-    return;
-  }
-  const fitsInCaption = captionText.length > 0 && captionText.length <= MAX_CAPTION_LENGTH;
-  if (fitsInCaption) {
-    await sendInCaptionMode(callback, attachments, captionText, env);
-  } else {
-    await sendInLongTextMode(callback.user_id, attachments, captionText, env);
-  }
 }
 
 async function handleCompleteCallback(callback: EngineCallback, env: Env): Promise<void> {

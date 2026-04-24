@@ -18,7 +18,37 @@ import {
   handleEngineCallback,
   validateEngineCallback,
 } from './services/message-handler';
+import { processStatusEntries } from './services/meta-api/status-webhook';
 import { logger } from './utils/logger';
+
+function hasStatusEntries(payload: WebhookPayload): boolean {
+  for (const entry of payload.entry) {
+    for (const change of entry.changes) {
+      if (change.value.statuses && change.value.statuses.length > 0) return true;
+    }
+  }
+  return false;
+}
+
+function hasInboundMessages(payload: WebhookPayload): boolean {
+  for (const entry of payload.entry) {
+    for (const change of entry.changes) {
+      if (change.value.messages && change.value.messages.length > 0) return true;
+    }
+  }
+  return false;
+}
+
+function processStatusesIfPresent(payload: WebhookPayload): void {
+  if (!hasStatusEntries(payload)) return;
+  try {
+    processStatusEntries(payload);
+  } catch (error) {
+    logger.error('Error processing status entries', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 /**
  * Extract the first sender's phone number from a webhook payload.
@@ -99,26 +129,33 @@ app.get('/meta-whatsapp', (c) => {
  * Returns 200 immediately to Meta, then processes the webhook in the background.
  * This prevents Meta from timing out and retrying during long AI processing.
  */
+async function authenticateWebhookRequest(
+  body: string,
+  sig256: string | null,
+  sig1: string | null,
+  userAgent: string | undefined,
+  env: Env
+): Promise<{ ok: true } | { ok: false; status: 401; reason: string }> {
+  const isValid = await verifyFacebookSignature(body, sig256, sig1, env.META_APP_SECRET);
+  if (!isValid) return { ok: false, status: 401, reason: 'Invalid webhook signature' };
+  if (userAgent?.trim() !== env.FACEBOOK_USER_AGENT) {
+    return { ok: false, status: 401, reason: 'Invalid user agent' };
+  }
+  return { ok: true };
+}
+
 app.post('/meta-whatsapp', async (c) => {
   const sig256 = c.req.header('X-Hub-Signature-256') ?? null;
   const sig1 = c.req.header('X-Hub-Signature') ?? null;
   const userAgent = c.req.header('User-Agent');
   const body = await c.req.text();
 
-  // Verify request signature
-  const isValid = await verifyFacebookSignature(body, sig256, sig1, c.env.META_APP_SECRET);
-  if (!isValid) {
-    logger.error('Invalid webhook signature');
-    return c.text('Unauthorized', 401);
+  const auth = await authenticateWebhookRequest(body, sig256, sig1, userAgent, c.env);
+  if (!auth.ok) {
+    logger.error(auth.reason);
+    return c.text('Unauthorized', auth.status);
   }
 
-  // Validate user agent
-  if (userAgent?.trim() !== c.env.FACEBOOK_USER_AGENT) {
-    logger.error('Invalid user agent', { userAgent, expected: c.env.FACEBOOK_USER_AGENT });
-    return c.text('Unauthorized', 401);
-  }
-
-  // Parse payload
   let payload: WebhookPayload;
   try {
     payload = JSON.parse(body) as WebhookPayload;
@@ -127,7 +164,14 @@ app.post('/meta-whatsapp', async (c) => {
     return c.json({ error: 'Invalid JSON' }, 400);
   }
 
-  // Validate GATEWAY_PUBLIC_URL before committing to process
+  // Status logging runs ahead of the misconfig gate — most valuable when
+  // delivery-side config is broken.
+  processStatusesIfPresent(payload);
+
+  if (!hasInboundMessages(payload)) {
+    return c.text('OK', 200);
+  }
+
   if (!c.env.GATEWAY_PUBLIC_URL) {
     logger.error('GATEWAY_PUBLIC_URL not configured — cannot deliver responses');
     const notify = notifyMisconfigOnce(payload, c.env);
@@ -135,7 +179,6 @@ app.post('/meta-whatsapp', async (c) => {
     return c.text('Service misconfigured', 503);
   }
 
-  // Return 200 immediately, process in background
   c.executionCtx.waitUntil(
     handleWebhook(payload, c.env).catch((error) => {
       logger.error('Error processing webhook', {

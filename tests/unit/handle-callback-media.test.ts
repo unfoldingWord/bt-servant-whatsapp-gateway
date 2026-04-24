@@ -19,6 +19,13 @@ const mockEnv: Env = {
   GATEWAY_PUBLIC_URL: 'https://gateway.example.com',
 };
 
+function metaOk(wamid = 'wamid.test'): {
+  ok: true;
+  json: () => Promise<{ messages: { id: string }[] }>;
+} {
+  return { ok: true, json: async () => ({ messages: [{ id: wamid }] }) };
+}
+
 function baseCallback(text: string): EngineCallback {
   return {
     type: 'complete',
@@ -34,7 +41,7 @@ function lastCallBody(fetchMock: ReturnType<typeof vi.fn>, idx: number): Record<
   return JSON.parse(call[1]?.body as string);
 }
 
-describe('handleEngineCallback with inline media', () => {
+describe('handleEngineCallback with inline media (always-prose-first)', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   const originalFetch = globalThis.fetch;
 
@@ -47,41 +54,49 @@ describe('handleEngineCallback with inline media', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('sends image message with caption (URL preserved as fallback) when text wraps one jpg URL', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true });
+  it('sends prose first then captionless image when text wraps one jpg URL', async () => {
+    fetchMock.mockResolvedValueOnce(metaOk()).mockResolvedValueOnce(metaOk());
 
     const text = 'Check this out:\n![Pic](https://cdn.example.com/pic.jpg)\n\nIsn’t it beautiful?';
     await handleEngineCallback(baseCallback(text), mockEnv);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = lastCallBody(fetchMock, 0);
-    expect(body.type).toBe('image');
-    expect(body.image).toEqual({
-      link: 'https://cdn.example.com/pic.jpg',
-      caption: 'Check this out:\nhttps://cdn.example.com/pic.jpg\n\nIsn’t it beautiful?',
-    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const leading = lastCallBody(fetchMock, 0);
+    expect(leading.type).toBe('text');
+    expect((leading.text as Record<string, unknown>).body).toBe(
+      'Check this out:\nhttps://cdn.example.com/pic.jpg\n\nIsn’t it beautiful?'
+    );
+
+    const image = lastCallBody(fetchMock, 1);
+    expect(image.type).toBe('image');
+    expect(image.image).toEqual({ link: 'https://cdn.example.com/pic.jpg' });
   });
 
-  it('sends video message with caption (URL preserved as fallback) when text wraps one mp4 URL', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true });
+  it('sends prose first then captionless video when text wraps one mp4 URL', async () => {
+    fetchMock.mockResolvedValueOnce(metaOk()).mockResolvedValueOnce(metaOk());
 
     const text = 'Here is a video:\n[Watch](https://cdn.example.com/clip.mp4)\n\nEnjoy!';
     await handleEngineCallback(baseCallback(text), mockEnv);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = lastCallBody(fetchMock, 0);
-    expect(body.type).toBe('video');
-    expect(body.video).toEqual({
-      link: 'https://cdn.example.com/clip.mp4',
-      caption: 'Here is a video:\nhttps://cdn.example.com/clip.mp4\n\nEnjoy!',
-    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const leading = lastCallBody(fetchMock, 0);
+    expect(leading.type).toBe('text');
+    expect((leading.text as Record<string, unknown>).body).toBe(
+      'Here is a video:\nhttps://cdn.example.com/clip.mp4\n\nEnjoy!'
+    );
+
+    const video = lastCallBody(fetchMock, 1);
+    expect(video.type).toBe('video');
+    expect(video.video).toEqual({ link: 'https://cdn.example.com/clip.mp4' });
   });
 
-  it('sends caption as standalone leading text + all attachments captionless when text wraps two URLs', async () => {
+  it('sends prose first + every attachment captionless when text wraps two URLs', async () => {
     fetchMock
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true });
+      .mockResolvedValueOnce(metaOk())
+      .mockResolvedValueOnce(metaOk())
+      .mockResolvedValueOnce(metaOk());
 
     const text =
       'Two things:\n![A](https://cdn.example.com/a.jpg)\n[B](https://cdn.example.com/b.mp4)\nDone.';
@@ -104,15 +119,14 @@ describe('handleEngineCallback with inline media', () => {
     expect((third.video as Record<string, unknown>).caption).toBeUndefined();
   });
 
-  it('still delivers all attachments when the leading text send fails (multi-attachment)', async () => {
+  it('still delivers all attachments when the leading text send fails', async () => {
     // Reliability: /progress-callback returned 200 before this code runs, so a
     // thrown error from the leading text send would drop the entire batch with
-    // no engine retry. The leading-text send must be non-fatal — attachments
-    // should still ship even if Meta rejected the preamble.
+    // no engine retry. The leading-text send must be non-fatal.
     fetchMock
       .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'Server Error' })
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true });
+      .mockResolvedValueOnce(metaOk())
+      .mockResolvedValueOnce(metaOk());
 
     const text =
       'Two things:\n![A](https://cdn.example.com/a.jpg)\n[B](https://cdn.example.com/b.mp4)\nDone.';
@@ -120,26 +134,23 @@ describe('handleEngineCallback with inline media', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
 
-    // 1st attempt: leading text (failed at Meta).
     const leading = lastCallBody(fetchMock, 0);
     expect(leading.type).toBe('text');
 
-    // 2nd: image #1, captionless, delivered despite the leading-text failure.
     const image = lastCallBody(fetchMock, 1);
     expect(image.type).toBe('image');
     expect((image.image as Record<string, unknown>).caption).toBeUndefined();
 
-    // 3rd: video #2, captionless, also delivered.
     const video = lastCallBody(fetchMock, 2);
     expect(video.type).toBe('video');
     expect((video.video as Record<string, unknown>).caption).toBeUndefined();
   });
 
-  it('leading text body is exactly the two URLs when multi-attachment input has no surrounding prose', async () => {
+  it('leading text body is exactly the URLs when input has no surrounding prose', async () => {
     fetchMock
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true });
+      .mockResolvedValueOnce(metaOk())
+      .mockResolvedValueOnce(metaOk())
+      .mockResolvedValueOnce(metaOk());
 
     const text = '![](https://cdn.example.com/a.jpg) ![](https://cdn.example.com/b.jpg)';
     await handleEngineCallback(baseCallback(text), mockEnv);
@@ -152,29 +163,44 @@ describe('handleEngineCallback with inline media', () => {
     );
   });
 
-  it('falls back to original text when the first (caption-bearing) media fails', async () => {
+  it('sends prose then URL fallback when single inline media fails synchronously', async () => {
+    // Always-prose-first means the user already has the URL in the leading
+    // text. The per-attachment fallback in sendRemainingAttachments still
+    // re-sends the URL alone so the failed slot is visibly accounted for.
     fetchMock
+      .mockResolvedValueOnce(metaOk())
       .mockResolvedValueOnce({ ok: false, status: 400, text: async () => 'Bad Request' })
-      .mockResolvedValueOnce({ ok: true });
+      .mockResolvedValueOnce(metaOk());
 
     const text = 'Look:\n![Img](https://cdn.example.com/broken.jpg)\nMoving on.';
     await handleEngineCallback(baseCallback(text), mockEnv);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const fallback = lastCallBody(fetchMock, 1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    const leading = lastCallBody(fetchMock, 0);
+    expect(leading.type).toBe('text');
+    expect((leading.text as Record<string, unknown>).body).toBe(
+      'Look:\nhttps://cdn.example.com/broken.jpg\nMoving on.'
+    );
+
+    const failedImage = lastCallBody(fetchMock, 1);
+    expect(failedImage.type).toBe('image');
+
+    const fallback = lastCallBody(fetchMock, 2);
     expect(fallback.type).toBe('text');
-    expect((fallback.text as Record<string, unknown>).body).toBe(text);
+    expect((fallback.text as Record<string, unknown>).body).toBe(
+      'https://cdn.example.com/broken.jpg'
+    );
   });
 
-  it('sends the URL as text when a later media fails, so the asset is not lost', async () => {
-    // Multi-attachment flow: leading text (caption), image #1 (ok), video #2
-    // (fail), then the failed video's URL retried as plain text via
-    // sendRemainingAttachments fallback.
+  it('falls back to URL-as-text when a later media fails so the asset is not lost', async () => {
+    // Multi-attachment: leading text (ok), image #1 (ok), video #2 (fail),
+    // failed video URL retried as plain text.
     fetchMock
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(metaOk())
+      .mockResolvedValueOnce(metaOk())
       .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'Server Error' })
-      .mockResolvedValueOnce({ ok: true });
+      .mockResolvedValueOnce(metaOk());
 
     const text =
       'Two things:\n![A](https://cdn.example.com/a.jpg)\n[B](https://cdn.example.com/b.mp4)\nDone.';
@@ -182,30 +208,56 @@ describe('handleEngineCallback with inline media', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
 
-    // 1st: leading text with the full caption (both URLs preserved).
     const leading = lastCallBody(fetchMock, 0);
     expect(leading.type).toBe('text');
-    expect((leading.text as Record<string, unknown>).body).toBe(
-      'Two things:\nhttps://cdn.example.com/a.jpg\nhttps://cdn.example.com/b.mp4\nDone.'
-    );
 
-    // 2nd: image #1, captionless, ok.
     const image = lastCallBody(fetchMock, 1);
     expect(image.type).toBe('image');
-    expect((image.image as Record<string, unknown>).caption).toBeUndefined();
 
-    // 3rd: failed video #2.
     const failedVideo = lastCallBody(fetchMock, 2);
     expect(failedVideo.type).toBe('video');
 
-    // 4th: the URL of the failed media, sent as plain text.
     const fallback = lastCallBody(fetchMock, 3);
     expect(fallback.type).toBe('text');
     expect((fallback.text as Record<string, unknown>).body).toBe('https://cdn.example.com/b.mp4');
   });
 
-  it('sends media captionless and full text (URL included) separately when caption exceeds 1024 chars', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: true });
+  it('treats a Meta-2xx-with-permanent-error as a media failure and falls back to URL', async () => {
+    // The catastrophe Issue #32 was opened for: Meta returns 200 with an
+    // embedded {error:{code:131052}}. Old code logged success and the user
+    // got nothing. New code: prose already sent, plus per-attachment fallback
+    // re-sends the URL.
+    fetchMock
+      .mockResolvedValueOnce(metaOk())
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ error: { code: 131052, message: 'Media download error' } }),
+      })
+      .mockResolvedValueOnce(metaOk());
+
+    const text = 'Watch:\n[V](https://cdn.example.com/huge.mp4)\nbye';
+    await handleEngineCallback(baseCallback(text), mockEnv);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    const leading = lastCallBody(fetchMock, 0);
+    expect(leading.type).toBe('text');
+    expect((leading.text as Record<string, unknown>).body).toContain(
+      'https://cdn.example.com/huge.mp4'
+    );
+
+    const failedVideo = lastCallBody(fetchMock, 1);
+    expect(failedVideo.type).toBe('video');
+
+    const urlFallback = lastCallBody(fetchMock, 2);
+    expect(urlFallback.type).toBe('text');
+    expect((urlFallback.text as Record<string, unknown>).body).toBe(
+      'https://cdn.example.com/huge.mp4'
+    );
+  });
+
+  it('sends prose first then captionless media when caption exceeds 1024 chars', async () => {
+    fetchMock.mockResolvedValueOnce(metaOk()).mockResolvedValueOnce(metaOk());
 
     const filler = 'a'.repeat(1100);
     const text = `${filler}\n\n![Pic](https://cdn.example.com/pic.jpg)\n\ntrailing`;
@@ -213,20 +265,20 @@ describe('handleEngineCallback with inline media', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    const mediaCall = lastCallBody(fetchMock, 0);
-    expect(mediaCall.type).toBe('image');
-    expect((mediaCall.image as Record<string, unknown>).caption).toBeUndefined();
-
-    const textCall = lastCallBody(fetchMock, 1);
+    const textCall = lastCallBody(fetchMock, 0);
     expect(textCall.type).toBe('text');
     const body = (textCall.text as Record<string, unknown>).body as string;
     expect(body).toContain(filler);
     expect(body).toContain('trailing');
     expect(body).toContain('https://cdn.example.com/pic.jpg');
+
+    const mediaCall = lastCallBody(fetchMock, 1);
+    expect(mediaCall.type).toBe('image');
+    expect((mediaCall.image as Record<string, unknown>).caption).toBeUndefined();
   });
 
   it('uses existing text path when no media URLs are present', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true });
+    fetchMock.mockResolvedValueOnce(metaOk());
 
     const text = 'Plain old text response, no media at all.';
     await handleEngineCallback(baseCallback(text), mockEnv);
@@ -237,26 +289,29 @@ describe('handleEngineCallback with inline media', () => {
     expect((body.text as Record<string, unknown>).body).toBe(text);
   });
 
-  it('handles worker markdown-wrapped video link: drops the label echo but keeps the URL as fallback', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true });
+  it('handles worker markdown-wrapped video link: drops label echo, keeps URL in prose', async () => {
+    fetchMock.mockResolvedValueOnce(metaOk()).mockResolvedValueOnce(metaOk());
 
     const text = 'Here is:\n[FIA Fishing Net](https://cdn.example.com/vid.mp4)\nEnjoy!';
     await handleEngineCallback(baseCallback(text), mockEnv);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = lastCallBody(fetchMock, 0);
-    expect(body.type).toBe('video');
-    const video = body.video as Record<string, unknown>;
-    expect(video.link).toBe('https://cdn.example.com/vid.mp4');
-    const caption = video.caption as string;
-    expect(caption).toBe('Here is:\nhttps://cdn.example.com/vid.mp4\nEnjoy!');
-    expect(caption).not.toContain('FIA Fishing Net');
-    expect(caption).not.toContain('[');
-    expect(caption).not.toContain('](');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const leading = lastCallBody(fetchMock, 0);
+    expect(leading.type).toBe('text');
+    const leadingBody = (leading.text as Record<string, unknown>).body as string;
+    expect(leadingBody).toBe('Here is:\nhttps://cdn.example.com/vid.mp4\nEnjoy!');
+    expect(leadingBody).not.toContain('FIA Fishing Net');
+    expect(leadingBody).not.toContain('[');
+    expect(leadingBody).not.toContain('](');
+
+    const video = lastCallBody(fetchMock, 1);
+    expect(video.type).toBe('video');
+    expect((video.video as Record<string, unknown>).link).toBe('https://cdn.example.com/vid.mp4');
+    expect((video.video as Record<string, unknown>).caption).toBeUndefined();
   });
 
   it('does not attempt media extraction when audio delivery succeeds', async () => {
-    // 1: Meta audio upload ok, 2: send audio by id ok — no media/text call expected
     fetchMock
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-aud-1' }) })
       .mockResolvedValueOnce({ ok: true });
@@ -273,7 +328,6 @@ describe('handleEngineCallback with inline media', () => {
     await handleEngineCallback(callback, mockEnv);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    // The audio send is by id, so no image/video call should be present.
     for (const call of fetchMock.mock.calls) {
       const init = call[1];
       if (init?.body && typeof init.body === 'string') {

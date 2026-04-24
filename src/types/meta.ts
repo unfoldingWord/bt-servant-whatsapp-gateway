@@ -46,12 +46,28 @@ export interface Contact {
   profile?: { name: string };
 }
 
+/** Status entry from Meta's delivery-status webhook */
+export interface StatusEntry {
+  id: string;
+  status: 'sent' | 'delivered' | 'read' | 'failed' | 'deleted';
+  timestamp: string;
+  recipient_id: string;
+  errors?: Array<{
+    code: number;
+    title: string;
+    message: string;
+    href?: string;
+    error_data?: { details?: string };
+  }>;
+}
+
 /** Webhook value containing messages */
 export interface WebhookValue {
   messaging_product: string;
   metadata: { display_phone_number: string; phone_number_id: string };
   contacts?: Contact[];
   messages?: RawMessage[];
+  statuses?: StatusEntry[];
 }
 
 /** Change entry in webhook */

@@ -209,6 +209,58 @@ describe('handleEngineCallback with PDF attachments', () => {
     );
   });
 
+  it('sends apology when attachments-only callback contains no PDF entries', async () => {
+    // Validation accepts any non-empty attachments[] but delivery only handles
+    // type === 'pdf'. Without the deliverability check, the user would silently
+    // get nothing here — the apology must fire.
+    fetchMock.mockResolvedValueOnce(metaOk()); // apology text only
+
+    const callback = {
+      type: 'complete',
+      user_id: '1234567890',
+      message_key: 'key-1',
+      timestamp: new Date().toISOString(),
+      attachments: [
+        {
+          type: 'spreadsheet',
+          url: 'https://cdn.example.com/sheet.xlsx',
+          filename: 'sheet.xlsx',
+          size_bytes: 1000,
+          mime_type: 'application/pdf',
+        },
+      ],
+    } as unknown as EngineCallback;
+
+    await handleEngineCallback(callback, mockEnv);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const apology = lastCallBody(fetchMock, 0);
+    expect(apology.type).toBe('text');
+    expect((apology.text as Record<string, unknown>).body).toMatch(/could not deliver/i);
+  });
+
+  it('sends apology when every PDF send fails AND every URL fallback also fails', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 400, text: async () => 'Bad Request' }) // doc fail
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'Server Error' }) // url fallback fail
+      .mockResolvedValueOnce(metaOk()); // apology
+
+    const callback: EngineCallback = {
+      type: 'complete',
+      user_id: '1234567890',
+      message_key: 'key-1',
+      timestamp: new Date().toISOString(),
+      attachments: pdfAttachment(),
+    };
+
+    await handleEngineCallback(callback, mockEnv);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const apology = lastCallBody(fetchMock, 2);
+    expect(apology.type).toBe('text');
+    expect((apology.text as Record<string, unknown>).body).toMatch(/could not deliver/i);
+  });
+
   it('skips unknown attachment types and continues with remaining PDFs', async () => {
     fetchMock
       .mockResolvedValueOnce(metaOk()) // text

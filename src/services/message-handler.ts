@@ -418,7 +418,8 @@ async function sendPdfAttachments(
   userId: string,
   attachments: EngineAttachment[],
   env: Env
-): Promise<void> {
+): Promise<boolean> {
+  let delivered = false;
   for (const att of attachments) {
     if (att.type !== 'pdf') {
       logger.warn('Skipping unknown attachment type', { type: att.type });
@@ -431,14 +432,17 @@ async function sendPdfAttachments(
         size_bytes: att.size_bytes,
         url: redactUrl(att.url),
       });
+      delivered = true;
       continue;
     }
     logger.warn('Document send failed, falling back to URL as text', {
       filename: att.filename,
       url: redactUrl(att.url),
     });
-    await sendToWhatsApp(userId, att.url, env);
+    const fallbackSent = await sendToWhatsApp(userId, att.url, env);
+    if (fallbackSent) delivered = true;
   }
+  return delivered;
 }
 
 async function handleCompleteCallback(callback: EngineCallback, env: Env): Promise<void> {
@@ -451,15 +455,20 @@ async function handleCompleteCallback(callback: EngineCallback, env: Env): Promi
     textSent = true;
   }
 
+  let pdfDelivered = false;
   if (pdfs.length > 0) {
-    await sendPdfAttachments(callback.user_id, pdfs, env);
+    pdfDelivered = await sendPdfAttachments(callback.user_id, pdfs, env);
   }
 
-  if (!audioSent && !textSent && pdfs.length === 0) {
-    logger.error('Audio delivery failed with no text or attachment fallback');
+  if (!audioSent && !textSent && !pdfDelivered) {
+    logger.error('Complete callback produced no deliverable content', {
+      hadText: Boolean(callback.text),
+      hadAudio: Boolean(callback.voice_audio_url || callback.voice_audio_base64),
+      attachmentCount: pdfs.length,
+    });
     await sendToWhatsApp(
       callback.user_id,
-      'Sorry, I could not deliver the audio response. Please try again.',
+      'Sorry, I could not deliver the response. Please try again.',
       env
     );
   }

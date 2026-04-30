@@ -67,7 +67,7 @@ export async function sendImageMessage(
   caption: string | undefined,
   env: Env
 ): Promise<boolean> {
-  return sendMediaByLink(to, 'image', link, caption, env);
+  return sendMediaByLink(to, 'image', link, { caption }, env);
 }
 
 /**
@@ -80,20 +80,42 @@ export async function sendVideoMessage(
   caption: string | undefined,
   env: Env
 ): Promise<boolean> {
-  return sendMediaByLink(to, 'video', link, caption, env);
+  return sendMediaByLink(to, 'video', link, { caption }, env);
 }
 
-type MediaKind = 'image' | 'video';
+/**
+ * Send a WhatsApp document message by public HTTPS link.
+ * Meta fetches the link directly; no upload required. The filename shows
+ * in the document tile in WhatsApp.
+ */
+export async function sendDocumentMessage(
+  to: string,
+  link: string,
+  filename: string,
+  env: Env
+): Promise<boolean> {
+  return sendMediaByLink(to, 'document', link, { filename }, env);
+}
+
+type MediaKind = 'image' | 'video' | 'document';
+
+interface MediaOptions {
+  caption?: string | undefined;
+  filename?: string | undefined;
+}
 
 function buildMediaPayload(
   to: string,
   kind: MediaKind,
   link: string,
-  caption: string | undefined
+  options: MediaOptions
 ): Record<string, unknown> {
   const mediaBody: Record<string, unknown> = { link };
-  if (caption && caption.length > 0) {
-    mediaBody.caption = caption;
+  if (options.caption && options.caption.length > 0) {
+    mediaBody.caption = options.caption;
+  }
+  if (kind === 'document' && options.filename && options.filename.length > 0) {
+    mediaBody.filename = options.filename;
   }
   return {
     messaging_product: 'whatsapp',
@@ -143,11 +165,11 @@ async function sendMediaByLink(
   to: string,
   kind: MediaKind,
   link: string,
-  caption: string | undefined,
+  options: MediaOptions,
   env: Env
 ): Promise<boolean> {
   const url = `${getBaseUrl()}/${env.META_PHONE_NUMBER_ID}/messages`;
-  const payload = buildMediaPayload(to, kind, link, caption);
+  const payload = buildMediaPayload(to, kind, link, options);
 
   const response = await fetch(url, {
     method: 'POST',

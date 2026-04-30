@@ -25,6 +25,15 @@ export interface ChatResponse {
 /** Callback type discriminator from the engine */
 export type EngineCallbackType = 'status' | 'progress' | 'complete' | 'error';
 
+/** A file attachment delivered alongside a complete callback. */
+export interface EngineAttachment {
+  type: 'pdf';
+  url: string;
+  filename: string;
+  size_bytes: number;
+  mime_type: 'application/pdf';
+}
+
 /** Unified payload received from engine callbacks */
 export interface EngineCallback {
   type: EngineCallbackType;
@@ -36,4 +45,5 @@ export interface EngineCallback {
   error?: string;
   voice_audio_base64?: string;
   voice_audio_url?: string;
+  attachments?: EngineAttachment[];
 }

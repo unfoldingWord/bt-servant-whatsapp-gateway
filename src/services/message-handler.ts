@@ -10,7 +10,7 @@ import type {
   Contact,
   WebhookPayload,
 } from '../types/meta';
-import type { EngineCallback } from '../types/engine';
+import type { EngineAttachment, EngineCallback } from '../types/engine';
 import {
   sendTextMessage as sendToWhatsApp,
   sendTypingIndicator,
@@ -18,6 +18,7 @@ import {
   sendAudioFromBuffer,
   sendImageMessage,
   sendVideoMessage,
+  sendDocumentMessage,
   downloadMedia,
 } from './meta-api/client';
 import { extractMedia } from './media-extractor';
@@ -255,6 +256,10 @@ const VALID_CALLBACK_TYPES = ['status', 'progress', 'complete', 'error'];
  * Validate type-specific required fields on a callback payload.
  * Returns an error string if invalid, null if valid.
  */
+function hasAttachments(p: Record<string, unknown>): boolean {
+  return Array.isArray(p.attachments) && p.attachments.length > 0;
+}
+
 function validateCallbackFields(type: string, p: Record<string, unknown>): string | null {
   if (type === 'progress' && !isNonEmptyString(p.text)) {
     return 'Missing or invalid text for progress callback';
@@ -263,9 +268,10 @@ function validateCallbackFields(type: string, p: Record<string, unknown>): strin
     type === 'complete' &&
     !isNonEmptyString(p.text) &&
     !isNonEmptyString(p.voice_audio_base64) &&
-    !isNonEmptyString(p.voice_audio_url)
+    !isNonEmptyString(p.voice_audio_url) &&
+    !hasAttachments(p)
   ) {
-    return 'Missing text, voice_audio_base64, or voice_audio_url for complete callback';
+    return 'Missing text, voice_audio_base64, voice_audio_url, or attachments for complete callback';
   }
   if (type === 'error' && !isNonEmptyString(p.error)) {
     return 'Missing or invalid error for error callback';
@@ -408,14 +414,49 @@ async function handleTextWithMedia(callback: EngineCallback, env: Env): Promise<
   await sendRemainingAttachments(callback.user_id, attachments, env);
 }
 
-async function handleCompleteCallback(callback: EngineCallback, env: Env): Promise<void> {
-  const audioSent = await tryAudioDelivery(callback, env);
-  if (audioSent) return;
+async function sendPdfAttachments(
+  userId: string,
+  attachments: EngineAttachment[],
+  env: Env
+): Promise<void> {
+  for (const att of attachments) {
+    if (att.type !== 'pdf') {
+      logger.warn('Skipping unknown attachment type', { type: att.type });
+      continue;
+    }
+    const sent = await sendDocumentMessage(userId, att.url, att.filename, env);
+    if (sent) {
+      logger.info('Sent document attachment', {
+        filename: att.filename,
+        size_bytes: att.size_bytes,
+        url: redactUrl(att.url),
+      });
+      continue;
+    }
+    logger.warn('Document send failed, falling back to URL as text', {
+      filename: att.filename,
+      url: redactUrl(att.url),
+    });
+    await sendToWhatsApp(userId, att.url, env);
+  }
+}
 
-  if (callback.text) {
+async function handleCompleteCallback(callback: EngineCallback, env: Env): Promise<void> {
+  const pdfs = callback.attachments ?? [];
+
+  const audioSent = await tryAudioDelivery(callback, env);
+  let textSent = false;
+  if (!audioSent && callback.text) {
     await handleTextWithMedia(callback, env);
-  } else {
-    logger.error('Audio delivery failed with no text fallback');
+    textSent = true;
+  }
+
+  if (pdfs.length > 0) {
+    await sendPdfAttachments(callback.user_id, pdfs, env);
+  }
+
+  if (!audioSent && !textSent && pdfs.length === 0) {
+    logger.error('Audio delivery failed with no text or attachment fallback');
     await sendToWhatsApp(
       callback.user_id,
       'Sorry, I could not deliver the audio response. Please try again.',

@@ -1,8 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import {
-  handleEngineCallback,
-  validateEngineCallback,
-} from '../../src/services/message-handler';
+import { handleEngineCallback, validateEngineCallback } from '../../src/services/message-handler';
 import type { Env } from '../../src/config/types';
 import type { EngineCallback } from '../../src/types/engine';
 

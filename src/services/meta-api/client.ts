@@ -225,7 +225,7 @@ export async function sendTypingIndicator(messageId: string, env: Env): Promise<
     return false;
   }
 
-  logger.debug('Sent typing indicator', { messageId });
+  logger.info('Sent typing indicator', { messageId });
   return true;
 }
 

@@ -118,10 +118,45 @@ export async function handleWebhook(payload: WebhookPayload, env: Env): Promise<
 
       const contacts = change.value.contacts ?? [];
       for (const raw of change.value.messages ?? []) {
-        await processMessage(raw, contacts, env);
+        await processMessageSafely(raw, contacts, env);
       }
     }
   }
+}
+
+/**
+ * Process one message entry, containing any failure so it can never abort
+ * the remaining messages in the same webhook batch. Meta has already been
+ * sent a 200 and will not retry, so a throw here means silent message loss.
+ */
+async function processMessageSafely(raw: RawMessage, contacts: Contact[], env: Env): Promise<void> {
+  try {
+    await processMessage(raw, contacts, env);
+  } catch (error) {
+    const sender = contacts[0]?.wa_id ?? raw.from;
+    logger.error('Error processing message entry', {
+      error: error instanceof Error ? error.message : String(error),
+      messageId: raw.id,
+      type: raw.type,
+      userId: sender ? sender.slice(0, 8) + '...' : 'unknown',
+    });
+  }
+}
+
+/**
+ * Log a diagnostic for a message entry with no identifiable sender.
+ * Captures payload shape (keys only, no message content) so the next
+ * occurrence tells us what Meta actually sent and who sent it.
+ */
+function logMalformedEntry(raw: RawMessage, contacts: Contact[]): void {
+  logger.error('Message entry has no sender id', {
+    messageId: raw.id,
+    type: raw.type,
+    timestamp: raw.timestamp,
+    rawKeys: Object.keys(raw),
+    contactsCount: contacts.length,
+    contactsShapes: contacts.map((c) => Object.keys(c)),
+  });
 }
 
 /**
@@ -131,7 +166,11 @@ async function validateMessage(message: IncomingMessage, env: Env): Promise<bool
   const cutoffSeconds = parseInt(env.MESSAGE_AGE_CUTOFF_SECONDS, 10);
 
   if (!isSupportedType(message.messageType)) {
-    logger.warn('Unsupported message type', { type: message.messageType });
+    logger.warn('Unsupported message type', {
+      type: message.messageType,
+      messageId: message.messageId,
+      userId: message.userId.slice(0, 8) + '...',
+    });
     return false;
   }
 
@@ -191,6 +230,13 @@ async function downloadAndEncodeAudio(
  */
 async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): Promise<void> {
   const message = parseMessage(raw, contacts);
+
+  // Production payloads have violated the RawMessage type: entries with
+  // neither contacts[0].wa_id nor from, leaving userId undefined (issue #41).
+  if (!message.userId) {
+    logMalformedEntry(raw, contacts);
+    return;
+  }
 
   logger.info('Received message', {
     type: message.messageType,

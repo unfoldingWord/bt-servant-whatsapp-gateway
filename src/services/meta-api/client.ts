@@ -20,6 +20,28 @@ function getBaseUrl(): string {
   return `https://graph.facebook.com/${META_API_VERSION}`;
 }
 
+/** Business-Scoped User IDs start with an ISO 3166 alpha-2 country code + "." */
+const BSUID_RE = /^[A-Z]{2}\./;
+
+/**
+ * Which /messages field a recipient id must be sent in. BSUIDs (masked user
+ * IDs from the WhatsApp Usernames rollout) require `recipient`; phone
+ * numbers keep using `to` (issue #43).
+ */
+function addressingMode(id: string): 'recipient' | 'to' {
+  return BSUID_RE.test(id) ? 'recipient' : 'to';
+}
+
+/** Build the recipient field for a /messages payload. */
+function recipientField(id: string): Record<string, string> {
+  return { [addressingMode(id)]: id };
+}
+
+/** Recipient context for send logs: addressing mode + truncated id. */
+function recipientLogFields(id: string): Record<string, string> {
+  return { addressing: addressingMode(id), recipient: id.slice(0, 8) + '...' };
+}
+
 /** Get authorization headers for Meta API */
 function getAuthHeaders(env: Env): Record<string, string> {
   return {
@@ -36,7 +58,7 @@ export async function sendTextMessage(to: string, text: string, env: Env): Promi
 
   const payload = {
     messaging_product: 'whatsapp',
-    to,
+    ...recipientField(to),
     type: 'text',
     text: { body: text },
   };
@@ -49,11 +71,15 @@ export async function sendTextMessage(to: string, text: string, env: Env): Promi
 
   if (!response.ok) {
     const errorText = await response.text();
-    logger.error('Failed to send Meta message', { status: response.status, error: errorText });
+    logger.error('Failed to send Meta message', {
+      status: response.status,
+      error: errorText,
+      ...recipientLogFields(to),
+    });
     return false;
   }
 
-  logger.info('Sent text message to user', { to: to.slice(0, 8) + '...' });
+  logger.info('Sent text message to user', recipientLogFields(to));
   return true;
 }
 
@@ -119,7 +145,7 @@ function buildMediaPayload(
   }
   return {
     messaging_product: 'whatsapp',
-    to,
+    ...recipientField(to),
     type: kind,
     [kind]: mediaBody,
   };
@@ -190,13 +216,14 @@ async function sendMediaByLink(
       status: response.status,
       kind,
       body,
+      ...recipientLogFields(to),
     });
     return false;
   }
 
   if (!classifyMetaBody(body, kind)) return false;
 
-  logger.info(`Sent ${kind} message to user`, { to: to.slice(0, 8) + '...' });
+  logger.info(`Sent ${kind} message to user`, recipientLogFields(to));
   return true;
 }
 
@@ -275,7 +302,7 @@ export async function sendAudioById(to: string, mediaId: string, env: Env): Prom
 
   const payload = {
     messaging_product: 'whatsapp',
-    to,
+    ...recipientField(to),
     type: 'audio',
     audio: { id: mediaId },
   };
@@ -288,11 +315,15 @@ export async function sendAudioById(to: string, mediaId: string, env: Env): Prom
 
   if (!response.ok) {
     const errorText = await response.text();
-    logger.error('Failed to send audio message', { status: response.status, error: errorText });
+    logger.error('Failed to send audio message', {
+      status: response.status,
+      error: errorText,
+      ...recipientLogFields(to),
+    });
     return false;
   }
 
-  logger.info('Sent audio message to user', { to: to.slice(0, 8) + '...' });
+  logger.info('Sent audio message to user', recipientLogFields(to));
   return true;
 }
 

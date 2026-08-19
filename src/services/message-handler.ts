@@ -30,6 +30,19 @@ import { logger } from '../utils/logger';
 import { redactUrl } from '../utils/url';
 
 /**
+ * Resolve a sender id from a raw message and its contacts entry.
+ * Phone-first: existing users' engine history is keyed by phone number.
+ * BSUID fields are the fallback for username-enabled senders (issue #43).
+ */
+export function resolveSenderId(
+  raw: RawMessage | undefined,
+  contacts: Contact[]
+): string | undefined {
+  const contact = contacts[0];
+  return contact?.wa_id ?? raw?.from ?? contact?.user_id ?? raw?.from_user_id;
+}
+
+/**
  * Parse a raw message from Meta webhook into IncomingMessage.
  */
 export function parseMessage(raw: RawMessage, contacts: Contact[]): IncomingMessage {
@@ -38,7 +51,7 @@ export function parseMessage(raw: RawMessage, contacts: Contact[]): IncomingMess
   const mediaId = raw.audio?.id;
 
   return {
-    userId: contacts[0]?.wa_id ?? raw.from,
+    userId: resolveSenderId(raw, contacts) ?? '',
     messageId: raw.id,
     messageType: msgType,
     timestamp: parseInt(raw.timestamp, 10),
@@ -133,7 +146,7 @@ async function processMessageSafely(raw: RawMessage, contacts: Contact[], env: E
   try {
     await processMessage(raw, contacts, env);
   } catch (error) {
-    const sender = contacts[0]?.wa_id ?? raw.from;
+    const sender = resolveSenderId(raw, contacts);
     logger.error('Error processing message entry', {
       error: error instanceof Error ? error.message : String(error),
       messageId: raw.id,
@@ -141,6 +154,19 @@ async function processMessageSafely(raw: RawMessage, contacts: Contact[], env: E
       userId: sender ? sender.slice(0, 8) + '...' : 'unknown',
     });
   }
+}
+
+/**
+ * Identify which payload field supplied the sender id, mirroring the
+ * fallback order in parseMessage. Logged with every received message so a
+ * prod failure on the BSUID path (issue #43) shows exactly what Meta sent.
+ */
+function senderSource(raw: RawMessage, contacts: Contact[]): string {
+  if (contacts[0]?.wa_id) return 'contact.wa_id';
+  if (raw.from) return 'message.from';
+  if (contacts[0]?.user_id) return 'contact.user_id';
+  if (raw.from_user_id) return 'message.from_user_id';
+  return 'none';
 }
 
 /**
@@ -242,6 +268,7 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
     type: message.messageType,
     messageId: message.messageId,
     userId: message.userId.slice(0, 8) + '...',
+    senderSource: senderSource(raw, contacts),
   });
 
   if (!(await validateMessage(message, env))) return;

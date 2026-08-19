@@ -25,6 +25,7 @@ function logStatus(status: StatusEntry): void {
     status: status.status,
     message_id: status.id,
     recipient_id: status.recipient_id,
+    recipient_user_id: status.recipient_user_id,
     timestamp: status.timestamp,
     errors: status.errors,
   });

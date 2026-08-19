@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { env, createExecutionContext, fetchMock, SELF } from 'cloudflare:test';
+import {
+  env,
+  createExecutionContext,
+  waitOnExecutionContext,
+  fetchMock,
+  SELF,
+} from 'cloudflare:test';
 import app from '../../src/index';
 import { arrayBufferToHex } from '../../src/utils/crypto';
 
@@ -216,6 +222,77 @@ describe('webhook routes', () => {
         expect(response.status).toBe(503);
         expect(await response.text()).toBe('Service misconfigured');
       } finally {
+        fetchMock.deactivate();
+      }
+    });
+
+    it('should send the misconfig notice to a BSUID-only sender via recipient (issue #43)', async () => {
+      const bsuid = 'CO.99887766554433221100';
+      const body = JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            id: '123',
+            changes: [
+              {
+                field: 'messages',
+                value: {
+                  messaging_product: 'whatsapp',
+                  metadata: { display_phone_number: '+1234', phone_number_id: '123456789' },
+                  contacts: [{ profile: { name: 'Username User' }, user_id: bsuid }],
+                  messages: [
+                    {
+                      id: 'wamid.misconfig-bsuid-test',
+                      from_user_id: bsuid,
+                      timestamp: String(Math.floor(Date.now() / 1000)),
+                      type: 'text',
+                      text: { body: 'hello' },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const signature = await computeSignature(body, env.META_APP_SECRET);
+
+      fetchMock.activate();
+      fetchMock.disableNetConnect();
+      fetchMock
+        .get('https://graph.facebook.com')
+        .intercept({ path: /.*/, method: 'POST' })
+        .reply(200, { messaging_product: 'whatsapp', messages: [{ id: 'wamid.mock' }] })
+        .persist();
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      try {
+        const misconfiguredEnv = { ...env, GATEWAY_PUBLIC_URL: '' };
+        const ctx = createExecutionContext();
+        const request = new Request('http://localhost/meta-whatsapp', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'facebookexternalua',
+            'X-Hub-Signature-256': signature,
+          },
+          body,
+        });
+
+        const response = await app.fetch(request, misconfiguredEnv, ctx);
+
+        expect(response.status).toBe(503);
+        expect(await response.text()).toBe('Service misconfigured');
+        await waitOnExecutionContext(ctx);
+
+        const infos = logSpy.mock.calls.map(
+          (c) => JSON.parse(c[0] as string) as Record<string, unknown>
+        );
+        const sent = infos.find((e) => e.message === 'Sent text message to user');
+        expect(sent?.addressing).toBe('recipient');
+        expect(sent?.recipient).toBe('CO.99887...');
+      } finally {
+        logSpy.mockRestore();
         fetchMock.deactivate();
       }
     });

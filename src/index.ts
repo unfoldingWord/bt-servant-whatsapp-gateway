@@ -17,6 +17,7 @@ import {
   handleWebhook,
   handleEngineCallback,
   validateEngineCallback,
+  resolveSenderId,
 } from './services/message-handler';
 import { processStatusEntries } from './services/meta-api/status-webhook';
 import { logger } from './utils/logger';
@@ -51,16 +52,15 @@ function processStatusesIfPresent(payload: WebhookPayload): void {
 }
 
 /**
- * Extract the first sender's phone number from a webhook payload.
- * Returns undefined if no sender can be identified.
+ * Extract the first sender's id (phone number or BSUID) from a webhook
+ * payload, phone-first to match parseMessage. Returns undefined if no
+ * sender can be identified.
  */
 function extractFirstSender(payload: WebhookPayload): string | undefined {
   for (const entry of payload.entry) {
     for (const change of entry.changes) {
-      const contacts = change.value.contacts;
-      if (contacts?.[0]?.wa_id) return contacts[0].wa_id;
-      const messages = change.value.messages;
-      if (messages?.[0]?.from) return messages[0].from;
+      const sender = resolveSenderId(change.value.messages?.[0], change.value.contacts ?? []);
+      if (sender) return sender;
     }
   }
   return undefined;

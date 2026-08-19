@@ -60,6 +60,24 @@ describe('processStatusEntries', () => {
     expect(entry.errors).toBeUndefined();
   });
 
+  it('logs recipient_user_id for a BSUID-addressed status entry (issue #43)', () => {
+    processStatusEntries(
+      payloadWithStatuses([
+        {
+          id: 'wamid.bsuid-1',
+          status: 'delivered',
+          timestamp: '1671526303',
+          recipient_user_id: 'CO.11102000000000000673',
+        },
+      ])
+    );
+
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const entry = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(entry.recipient_id).toBeUndefined();
+    expect(entry.recipient_user_id).toBe('CO.11102000000000000673');
+  });
+
   it('logs a failed status entry with the errors array preserved', () => {
     processStatusEntries(
       payloadWithStatuses([

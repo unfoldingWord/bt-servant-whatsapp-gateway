@@ -28,7 +28,10 @@ export interface IncomingMessage {
 /** Raw message from Meta webhook */
 export interface RawMessage {
   id: string;
-  from: string;
+  /** E.164 phone number; omitted for username-enabled senders (issue #43) */
+  from?: string;
+  /** Business-Scoped User ID, e.g. "CO.11102...0673" */
+  from_user_id?: string;
   timestamp: string;
   type: string;
   text?: { body: string };
@@ -42,7 +45,10 @@ export interface RawMessage {
 
 /** Contact info from Meta webhook */
 export interface Contact {
-  wa_id: string;
+  /** E.164 phone number; omitted for username-enabled senders (issue #43) */
+  wa_id?: string;
+  /** Business-Scoped User ID, e.g. "CO.11102...0673" */
+  user_id?: string;
   profile?: { name: string };
 }
 
@@ -51,7 +57,10 @@ export interface StatusEntry {
   id: string;
   status: 'sent' | 'delivered' | 'read' | 'failed' | 'deleted';
   timestamp: string;
-  recipient_id: string;
+  /** E.164 phone number; omitted for username-enabled recipients (issue #43) */
+  recipient_id?: string;
+  /** Business-Scoped User ID of the recipient, when addressed by BSUID */
+  recipient_user_id?: string;
   errors?: Array<{
     code: number;
     title: string;

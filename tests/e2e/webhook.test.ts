@@ -418,20 +418,26 @@ describe('webhook routes', () => {
     });
 
     it('should accept valid status callback', async () => {
-      const response = await SELF.fetch('http://localhost/progress-callback', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          type: 'status',
-          user_id: 'test',
-          message_key: 'status-test-key',
-          message: 'Processing step 2',
-          timestamp: new Date().toISOString(),
+      const ctx = createExecutionContext();
+      const response = await app.fetch(
+        new Request('http://localhost/progress-callback', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            type: 'status',
+            user_id: 'test',
+            message_key: 'status-test-key',
+            message: 'Processing step 2',
+            timestamp: new Date().toISOString(),
+          }),
         }),
-      });
+        env,
+        ctx
+      );
 
       expect(response.status).toBe(200);
       expect(await response.text()).toBe('OK');
+      await waitOnExecutionContext(ctx);
 
       const typing = graphBodies
         .filter((raw) => raw.includes('typing_indicator'))

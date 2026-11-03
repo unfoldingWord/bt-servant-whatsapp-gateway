@@ -605,6 +605,8 @@ async function renewTypingFromStatus(messageKey: string, env: Env): Promise<void
 
   const signal = openTypingSend(messageId);
   try {
+    // Abort cannot retract a POST Meta has already accepted. There is no
+    // stop-typing call; the reply, or 25 seconds, clears the indicator.
     const sent = await sendTypingIndicator(messageId, env, signal);
     if (discardFinishedTyping(messageId, signal)) return;
     if (!sent) releaseTypingClaim(messageId, claim.previousSentAt);
@@ -642,6 +644,8 @@ export async function handleEngineCallback(callback: EngineCallback, env: Env): 
     }
     return;
   }
+  // index.ts stops these two before waitUntil. Stopping here covers callers
+  // that invoke this function directly. finishTypingTurn is idempotent.
   if (callback.type === 'complete') {
     stopTypingForTurn(callback.message_key);
     await handleCompleteCallback(callback, env);

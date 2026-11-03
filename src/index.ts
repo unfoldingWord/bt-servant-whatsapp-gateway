@@ -276,6 +276,8 @@ app.post('/progress-callback', async (c) => {
 
   // Stop before waitUntil so a status accepted after this request cannot
   // restart "typing…" while the reply is still being sent.
+  // handleEngineCallback stops again for callers that skip this route.
+  // finishTypingTurn is idempotent, so the second call changes nothing.
   if (callback.type === 'complete' || callback.type === 'error') {
     stopTypingForTurn(callback.message_key);
   }

@@ -360,8 +360,10 @@ describe('typing indicator on engine status callbacks', () => {
       )
     ).resolves.toBeUndefined();
 
-    const logged = errorSpy.mock.calls.map((call) => String(call[0])).join('\n');
-    expect(logged).toContain('Failed to send typing indicator');
+    const typingErrors = errorSpy.mock.calls.filter((call) =>
+      String(call[0]).includes('Failed to send typing indicator')
+    );
+    expect(typingErrors).toHaveLength(1);
     errorSpy.mockRestore();
   });
 

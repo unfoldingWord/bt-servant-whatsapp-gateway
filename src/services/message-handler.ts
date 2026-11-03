@@ -623,8 +623,12 @@ async function renewTypingFromStatus(messageKey: string, env: Env): Promise<void
 }
 
 function discardFinishedTyping(messageId: string, signal: AbortSignal): boolean {
-  if (!signal.aborted && !typingTurnFinished(messageId)) return false;
-  logger.info('Typing indicator cancelled; turn already finished', { messageId });
+  const finished = typingTurnFinished(messageId);
+  if (!signal.aborted && !finished) return false;
+  const message = finished
+    ? 'Typing indicator cancelled; turn already finished'
+    : 'Typing indicator replaced by a newer send';
+  logger.info(message, { messageId });
   return true;
 }
 

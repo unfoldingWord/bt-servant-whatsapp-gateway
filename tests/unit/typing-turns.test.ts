@@ -73,6 +73,18 @@ describe('typing turn memory', () => {
     expect(signal.aborted).toBe(true);
   });
 
+  it('aborts the earlier send when a new one opens for the same turn', () => {
+    const earlier = openTypingSend('wamid.overlap');
+    const latest = openTypingSend('wamid.overlap');
+
+    expect(earlier.aborted).toBe(true);
+    expect(latest.aborted).toBe(false);
+
+    finishTypingTurn('wamid.overlap');
+    expect(latest.aborted).toBe(true);
+    expect(earlier.aborted).toBe(true);
+  });
+
   it('leaves a settled send alone when the turn finishes afterwards', () => {
     const signal = openTypingSend('wamid.closed');
     closeTypingSend('wamid.closed', signal);

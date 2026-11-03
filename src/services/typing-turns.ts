@@ -86,10 +86,15 @@ export function releaseTypingClaim(messageId: string, previousSentAt: number): v
   turn.lastSentAt = previousSentAt;
 }
 
-/** Signal for the Cloud API call. Finishing the turn aborts it. */
+/**
+ * Signal for the Cloud API call. A newer send aborts the previous one, and
+ * finishing the turn aborts whichever call is still current.
+ */
 export function openTypingSend(messageId: string): AbortSignal {
+  const previous = inflight.get(messageId);
   const controller = new AbortController();
   inflight.set(messageId, controller);
+  previous?.abort();
   return controller.signal;
 }
 

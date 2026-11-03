@@ -63,6 +63,86 @@ function callbackRequest(headers: Record<string, string>, body: EngineCallback):
   });
 }
 
+interface HeldTypingCall {
+  signal: AbortSignal | undefined;
+  succeed: () => void;
+}
+
+/** One typing POST that stays open until `succeed`. Abort rejects it and does not count. */
+function heldTypingResponse(
+  signal: AbortSignal | undefined,
+  onAccept: () => void
+): { response: Promise<unknown>; succeed: () => void } {
+  let succeed = (): void => {};
+  const gate = new Promise<void>((resolve) => {
+    succeed = resolve;
+  });
+  const response = new Promise((resolve, reject) => {
+    let settled = false;
+    const cancel = (): void => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('aborted'));
+    };
+    const accept = (): void => {
+      if (settled) return;
+      settled = true;
+      onAccept();
+      resolve(metaOk());
+    };
+    if (signal?.aborted) {
+      cancel();
+      return;
+    }
+    signal?.addEventListener('abort', cancel, { once: true });
+    void gate.then(() => {
+      if (signal?.aborted) cancel();
+      else accept();
+    });
+  });
+  return { response, succeed };
+}
+
+/** Hold every typing POST until the test releases it. Abort rejects the call. */
+function holdEachTypingFetch(fetchMock: ReturnType<typeof vi.fn>): {
+  next: () => Promise<HeldTypingCall>;
+  accepted: () => number;
+} {
+  let accepted = 0;
+  const queue: HeldTypingCall[] = [];
+  const waiters: ((call: HeldTypingCall) => void)[] = [];
+
+  const deliver = (call: HeldTypingCall): void => {
+    const waiter = waiters.shift();
+    if (waiter) waiter(call);
+    else queue.push(call);
+  };
+
+  fetchMock.mockImplementation((_url: unknown, init?: RequestInit) => {
+    const raw = init?.body;
+    const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : undefined;
+    const isTyping = typeof parsed === 'object' && parsed !== null && 'typing_indicator' in parsed;
+    if (!isTyping) return Promise.resolve(metaOk());
+
+    const held = heldTypingResponse(init?.signal ?? undefined, () => {
+      accepted += 1;
+    });
+    deliver({ signal: init?.signal ?? undefined, succeed: held.succeed });
+    return held.response;
+  });
+
+  return {
+    next: () => {
+      const queued = queue.shift();
+      if (queued) return Promise.resolve(queued);
+      return new Promise((resolve) => {
+        waiters.push(resolve);
+      });
+    },
+    accepted: () => accepted,
+  };
+}
+
 function holdTypingFetch(fetchMock: ReturnType<typeof vi.fn>): {
   signal: () => AbortSignal | undefined;
   release: () => void;
@@ -395,6 +475,116 @@ describe('typing indicator on engine status callbacks', () => {
         typing_indicator: { type: 'text' },
       },
     ]);
+  });
+
+  it('aborts a 15s typing call when the next status renews it, and complete aborts the rest', async () => {
+    const held = holdEachTypingFetch(fetchMock);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const messageKey = 'wamid.overlap-slow';
+
+    try {
+      const firstStatus = handleEngineCallback(
+        callback({ type: 'status', message_key: messageKey, message: 'First lookup' }),
+        mockEnv
+      );
+      const first = await held.next();
+
+      vi.setSystemTime(new Date('2026-01-01T00:00:10.000Z'));
+      const secondStatus = handleEngineCallback(
+        callback({ type: 'status', message_key: messageKey, message: 'Second lookup' }),
+        mockEnv
+      );
+      const second = await held.next();
+      expect(first.signal?.aborted).toBe(true);
+      expect(second.signal?.aborted).toBe(false);
+
+      first.succeed();
+      await firstStatus;
+      const replaced = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(replaced).toContain('Typing indicator replaced by a newer send');
+      expect(replaced).not.toContain('turn already finished');
+
+      vi.setSystemTime(new Date('2026-01-01T00:00:12.000Z'));
+      await handleEngineCallback(
+        callback({ type: 'complete', message_key: messageKey, text: 'The answer.' }),
+        mockEnv
+      );
+      expect(second.signal?.aborted).toBe(true);
+
+      second.succeed();
+      await secondStatus;
+
+      expect(held.accepted()).toBe(0);
+      const errors = errorSpy.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(errors).not.toContain('Failed to send typing indicator');
+      expect(typingBodies(fetchMock)).toHaveLength(2);
+      expect(textBodies(fetchMock)).toEqual([
+        {
+          messaging_product: 'whatsapp',
+          to: '15551230000',
+          type: 'text',
+          text: { body: 'The answer.' },
+        },
+      ]);
+    } finally {
+      errorSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
+
+  it('discards a typing response that succeeds after complete, with no retry and no failure log', async () => {
+    let release = (): void => {};
+    let captured: AbortSignal | undefined;
+    fetchMock.mockImplementation((_url: unknown, init?: RequestInit) => {
+      const raw = init?.body;
+      const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : undefined;
+      const isTyping =
+        typeof parsed === 'object' && parsed !== null && 'typing_indicator' in parsed;
+      if (!isTyping) return Promise.resolve(metaOk());
+      captured = init?.signal ?? undefined;
+      return new Promise((resolve) => {
+        release = () => resolve(metaOk());
+      });
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const messageKey = 'wamid.late-ok';
+
+    try {
+      const statusPromise = handleEngineCallback(
+        callback({ type: 'status', message_key: messageKey, message: 'Still working' }),
+        mockEnv
+      );
+      expect(captured).toBeDefined();
+
+      await handleEngineCallback(
+        callback({ type: 'complete', message_key: messageKey, text: 'The answer.' }),
+        mockEnv
+      );
+      expect(captured?.aborted).toBe(true);
+
+      release();
+      await statusPromise;
+
+      const errors = errorSpy.mock.calls.map((call) => String(call[0])).join('\n');
+      const logged = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(errors).not.toContain('Failed to send typing indicator');
+      expect(logged).toContain('Typing indicator cancelled; turn already finished');
+      expect(typingBodies(fetchMock)).toHaveLength(1);
+      expect(textBodies(fetchMock)).toEqual([
+        {
+          messaging_product: 'whatsapp',
+          to: '15551230000',
+          type: 'text',
+          text: { body: 'The answer.' },
+        },
+      ]);
+    } finally {
+      release();
+      errorSpy.mockRestore();
+      logSpy.mockRestore();
+    }
   });
 
   it('still sends only the final answer on complete', async () => {

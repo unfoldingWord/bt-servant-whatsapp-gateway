@@ -230,7 +230,11 @@ async function sendMediaByLink(
 /**
  * Send typing indicator (read receipt) for a message.
  */
-export async function sendTypingIndicator(messageId: string, env: Env): Promise<boolean> {
+export async function sendTypingIndicator(
+  messageId: string,
+  env: Env,
+  signal?: AbortSignal
+): Promise<boolean> {
   const url = `${getBaseUrl()}/${env.META_PHONE_NUMBER_ID}/messages`;
 
   const payload = {
@@ -244,6 +248,7 @@ export async function sendTypingIndicator(messageId: string, env: Env): Promise<
     method: 'POST',
     headers: getAuthHeaders(env),
     body: JSON.stringify(payload),
+    ...(signal ? { signal } : {}),
   });
 
   if (!response.ok) {

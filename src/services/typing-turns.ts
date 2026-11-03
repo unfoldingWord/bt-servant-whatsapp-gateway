@@ -7,6 +7,10 @@
  *
  * State is in-memory for this isolate, same as complete-callback dedup.
  * A late status that lands on another isolate can still refresh typing once.
+ * After an hour the entry is dropped, finished marker included, so a status
+ * that late can refresh once in this isolate too. That is the same hour
+ * complete-callback dedup already accepts. Keeping finished ids past it
+ * would let the map grow without a bound.
  */
 
 /** Meta dismisses the indicator after 25s. Refresh well inside that, at most every 10s. */
@@ -24,6 +28,7 @@ interface TypingTurn {
 }
 
 const turns = new Map<string, TypingTurn>();
+const inflight = new Map<string, AbortController>();
 let lastSweepAt = 0;
 
 export type TypingSkipReason = 'finished' | 'throttled';
@@ -81,6 +86,31 @@ export function releaseTypingClaim(messageId: string, previousSentAt: number): v
   turn.lastSentAt = previousSentAt;
 }
 
+/** Signal for the Cloud API call. Finishing the turn aborts it. */
+export function openTypingSend(messageId: string): AbortSignal {
+  const controller = new AbortController();
+  inflight.set(messageId, controller);
+  return controller.signal;
+}
+
+/** Drop the signal after the call settles, so a later finish does not abort it. */
+export function closeTypingSend(messageId: string, signal: AbortSignal): void {
+  const current = inflight.get(messageId);
+  if (current?.signal === signal) inflight.delete(messageId);
+}
+
+/** True when complete or error already accepted this turn. */
+export function typingTurnFinished(messageId: string): boolean {
+  return turns.get(messageId)?.finished === true;
+}
+
+/** Turn state without sweeping. Tests use this to see that sweep removed other keys. */
+export function typingTurnRecord(messageId: string): 'open' | 'finished' | 'absent' {
+  const turn = turns.get(messageId);
+  if (!turn) return 'absent';
+  return turn.finished ? 'finished' : 'open';
+}
+
 /** Remember a successful indicator, including the one sent when the message arrives. */
 export function recordTypingSent(messageId: string): void {
   const current = Date.now();
@@ -100,4 +130,12 @@ export function finishTypingTurn(messageId: string): void {
   turn.finished = true;
   turn.expiresAt = current + TURN_TTL_MS;
   turns.set(messageId, turn);
+  abortTypingSend(messageId);
+}
+
+function abortTypingSend(messageId: string): void {
+  const pending = inflight.get(messageId);
+  if (!pending) return;
+  inflight.delete(messageId);
+  pending.abort();
 }

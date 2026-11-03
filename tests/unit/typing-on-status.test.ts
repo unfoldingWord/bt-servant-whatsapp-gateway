@@ -55,6 +55,52 @@ function metaOk(): { ok: true; json: () => Promise<unknown>; text: () => Promise
   return { ok: true, json: async () => ({ success: true }), text: async () => '' };
 }
 
+function callbackRequest(headers: Record<string, string>, body: EngineCallback): Request {
+  return new Request('http://localhost/progress-callback', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
+function holdTypingFetch(fetchMock: ReturnType<typeof vi.fn>): {
+  signal: () => AbortSignal | undefined;
+  release: () => void;
+} {
+  let typingSignal: AbortSignal | undefined;
+  let releaseTyping = (): void => {};
+  const held = new Promise<void>((resolve) => {
+    releaseTyping = resolve;
+  });
+
+  fetchMock.mockImplementation((_url: unknown, init?: RequestInit) => {
+    const raw = init?.body;
+    const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : undefined;
+    const isTyping = typeof parsed === 'object' && parsed !== null && 'typing_indicator' in parsed;
+    if (!isTyping) return Promise.resolve(metaOk());
+
+    typingSignal = init?.signal ?? undefined;
+    const signal = init?.signal;
+    return new Promise((resolve, reject) => {
+      const cancel = (): void => reject(new Error('aborted'));
+      if (signal?.aborted) {
+        cancel();
+        return;
+      }
+      signal?.addEventListener('abort', cancel, { once: true });
+      void held.then(() => {
+        if (signal?.aborted) cancel();
+        else resolve(metaOk());
+      });
+    });
+  });
+
+  return {
+    signal: () => typingSignal,
+    release: () => releaseTyping(),
+  };
+}
+
 function inboundPayload(messageId: string): WebhookPayload {
   return {
     object: 'whatsapp_business_account',
@@ -102,6 +148,25 @@ describe('typing indicator on engine status callbacks', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     vi.useRealTimers();
+  });
+
+  it('logs the status text and does not send it as a chat message', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handleEngineCallback(
+      callback({
+        type: 'status',
+        message_key: 'wamid.log-status',
+        message: 'Looking up the article',
+      }),
+      mockEnv
+    );
+
+    const logged = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(logged).toContain('Status callback');
+    expect(logged).toContain('Looking up the article');
+    expect(textBodies(fetchMock)).toEqual([]);
+    logSpy.mockRestore();
   });
 
   it('sends a typing indicator for that turn and no chat message', async () => {
@@ -359,6 +424,123 @@ describe('POST /progress-callback typing failures', () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+  });
+
+  it('cancels a slow typing call when complete arrives before Meta answers', async () => {
+    const held = holdTypingFetch(fetchMock);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Engine-Token': env.ENGINE_API_KEY,
+    };
+    const messageKey = 'wamid.inflight-complete';
+
+    try {
+      const statusCtx = createExecutionContext();
+      const statusResponse = await app.fetch(
+        callbackRequest(headers, {
+          type: 'status',
+          user_id: '15551230000',
+          message_key: messageKey,
+          message: 'Working',
+          timestamp: '2026-01-01T00:00:00.000Z',
+        }),
+        env,
+        statusCtx
+      );
+      expect(statusResponse.status).toBe(200);
+      expect(held.signal()).toBeDefined();
+
+      const completeCtx = createExecutionContext();
+      const completeResponse = await app.fetch(
+        callbackRequest(headers, {
+          type: 'complete',
+          user_id: '15551230000',
+          message_key: messageKey,
+          text: 'The answer.',
+          timestamp: '2026-01-01T00:00:20.000Z',
+        }),
+        env,
+        completeCtx
+      );
+      expect(completeResponse.status).toBe(200);
+      expect(held.signal()?.aborted).toBe(true);
+
+      held.release();
+      await waitOnExecutionContext(statusCtx);
+      await waitOnExecutionContext(completeCtx);
+
+      expect(errorSpy.mock.calls.map((call) => String(call[0])).join('\n')).not.toContain(
+        'Failed to send typing indicator'
+      );
+      expect(textBodies(fetchMock)).toEqual([
+        {
+          messaging_product: 'whatsapp',
+          to: '15551230000',
+          type: 'text',
+          text: { body: 'The answer.' },
+        },
+      ]);
+    } finally {
+      held.release();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('cancels a slow typing call when error arrives before Meta answers', async () => {
+    const held = holdTypingFetch(fetchMock);
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Engine-Token': env.ENGINE_API_KEY,
+    };
+    const messageKey = 'wamid.inflight-error';
+
+    try {
+      const statusCtx = createExecutionContext();
+      const statusResponse = await app.fetch(
+        callbackRequest(headers, {
+          type: 'status',
+          user_id: '15551230000',
+          message_key: messageKey,
+          message: 'Working',
+          timestamp: '2026-01-01T00:00:00.000Z',
+        }),
+        env,
+        statusCtx
+      );
+      expect(statusResponse.status).toBe(200);
+
+      const errorCtx = createExecutionContext();
+      const errorResponse = await app.fetch(
+        callbackRequest(headers, {
+          type: 'error',
+          user_id: '15551230000',
+          message_key: messageKey,
+          error: 'model failed',
+          timestamp: '2026-01-01T00:00:20.000Z',
+        }),
+        env,
+        errorCtx
+      );
+      expect(errorResponse.status).toBe(200);
+      expect(held.signal()?.aborted).toBe(true);
+
+      held.release();
+      await waitOnExecutionContext(statusCtx);
+      await waitOnExecutionContext(errorCtx);
+      expect(textBodies(fetchMock)).toEqual([
+        {
+          messaging_product: 'whatsapp',
+          to: '15551230000',
+          type: 'text',
+          text: {
+            body: 'Sorry, I encountered an error processing your message. Please try again.',
+          },
+        },
+      ]);
+    } finally {
+      held.release();
+    }
   });
 
   it('answers 200 when the typing call fails and a later status does not restart after complete', async () => {

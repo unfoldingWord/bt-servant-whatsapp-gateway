@@ -28,10 +28,13 @@ import type { AudioPayload, SendMessageOptions } from './engine-client';
 import { chunkMessage } from './chunking';
 import {
   claimTypingSend,
+  closeTypingSend,
   finishTypingTurn,
   inboundMessageId,
+  openTypingSend,
   recordTypingSent,
   releaseTypingClaim,
+  typingTurnFinished,
 } from './typing-turns';
 import { logger } from '../utils/logger';
 import { redactUrl } from '../utils/url';
@@ -600,16 +603,27 @@ async function renewTypingFromStatus(messageKey: string, env: Env): Promise<void
     return;
   }
 
+  const signal = openTypingSend(messageId);
   try {
-    const sent = await sendTypingIndicator(messageId, env);
+    const sent = await sendTypingIndicator(messageId, env, signal);
+    if (discardFinishedTyping(messageId, signal)) return;
     if (!sent) releaseTypingClaim(messageId, claim.previousSentAt);
   } catch (error) {
+    if (discardFinishedTyping(messageId, signal)) return;
     releaseTypingClaim(messageId, claim.previousSentAt);
     logger.error('Failed to send typing indicator', {
       messageId,
       error: error instanceof Error ? error.message : String(error),
     });
+  } finally {
+    closeTypingSend(messageId, signal);
   }
+}
+
+function discardFinishedTyping(messageId: string, signal: AbortSignal): boolean {
+  if (!signal.aborted && !typingTurnFinished(messageId)) return false;
+  logger.info('Typing indicator cancelled; turn already finished', { messageId });
+  return true;
 }
 
 /**
@@ -638,5 +652,6 @@ export async function handleEngineCallback(callback: EngineCallback, env: Env): 
     await sendEngineError(callback, env);
     return;
   }
+  logger.info('Status callback', { status: callback.message });
   await renewTypingFromStatus(callback.message_key, env);
 }

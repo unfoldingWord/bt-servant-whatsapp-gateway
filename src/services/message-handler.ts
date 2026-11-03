@@ -26,6 +26,13 @@ import type { MediaAttachment } from './media-extractor';
 import { sendMessage as sendToEngine } from './engine-client';
 import type { AudioPayload, SendMessageOptions } from './engine-client';
 import { chunkMessage } from './chunking';
+import {
+  claimTypingSend,
+  finishTypingTurn,
+  inboundMessageId,
+  recordTypingSent,
+  releaseTypingClaim,
+} from './typing-turns';
 import { logger } from '../utils/logger';
 import { redactUrl } from '../utils/url';
 
@@ -273,7 +280,7 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
 
   if (!(await validateMessage(message, env))) return;
 
-  await sendTypingIndicator(message.messageId, env);
+  await showInboundTyping(message.messageId, env);
 
   let audio: AudioPayload | undefined;
   if (message.messageType === 'audio' && message.mediaId) {
@@ -300,6 +307,15 @@ async function processMessage(raw: RawMessage, contacts: Contact[], env: Env): P
   logger.info('Message accepted', {
     messageId: result.message_id,
   });
+}
+
+/**
+ * Show "typing…" for the inbound message and start this turn's 10s window.
+ * A network failure still propagates, matching the previous inbound path.
+ */
+async function showInboundTyping(messageId: string, env: Env): Promise<void> {
+  const shown = await sendTypingIndicator(messageId, env);
+  if (shown) recordTypingSent(messageId);
 }
 
 /**
@@ -547,6 +563,55 @@ async function handleCompleteCallback(callback: EngineCallback, env: Env): Promi
   }
 }
 
+/** Stop renewing "typing…" for this turn. Safe to call more than once. */
+export function stopTypingForTurn(messageKey: string): void {
+  const messageId = inboundMessageId(messageKey);
+  if (!messageId) return;
+  finishTypingTurn(messageId);
+}
+
+async function sendEngineError(callback: EngineCallback, env: Env): Promise<void> {
+  const errorMsg = callback.error ?? 'Unknown error';
+  logger.error('Engine reported error', { error: errorMsg });
+  const sent = await sendToWhatsApp(
+    callback.user_id,
+    'Sorry, I encountered an error processing your message. Please try again.',
+    env
+  );
+  if (!sent) {
+    throw new Error(`Failed to send error message to ${callback.user_id.slice(0, 8)}...`);
+  }
+}
+
+/**
+ * Refresh the typing indicator for a status callback.
+ * A failed Cloud API call is logged and does not reject the callback.
+ */
+async function renewTypingFromStatus(messageKey: string, env: Env): Promise<void> {
+  const messageId = inboundMessageId(messageKey);
+  if (!messageId) {
+    logger.info('Skipping typing indicator; no inbound message id', { messageKey });
+    return;
+  }
+
+  const claim = claimTypingSend(messageId);
+  if (typeof claim === 'string') {
+    logger.info('Skipping typing indicator', { messageKey: messageId, reason: claim });
+    return;
+  }
+
+  try {
+    const sent = await sendTypingIndicator(messageId, env);
+    if (!sent) releaseTypingClaim(messageId, claim.previousSentAt);
+  } catch (error) {
+    releaseTypingClaim(messageId, claim.previousSentAt);
+    logger.error('Failed to send typing indicator', {
+      messageId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /**
  * Handle an engine callback, dispatching by type.
  */
@@ -561,20 +626,17 @@ export async function handleEngineCallback(callback: EngineCallback, env: Env): 
     if (callback.text) {
       await sendToWhatsApp(callback.user_id, callback.text, env);
     }
-  } else if (callback.type === 'complete') {
-    await handleCompleteCallback(callback, env);
-  } else if (callback.type === 'error') {
-    const errorMsg = callback.error ?? 'Unknown error';
-    logger.error('Engine reported error', { error: errorMsg });
-    const sent = await sendToWhatsApp(
-      callback.user_id,
-      'Sorry, I encountered an error processing your message. Please try again.',
-      env
-    );
-    if (!sent) {
-      throw new Error(`Failed to send error message to ${callback.user_id.slice(0, 8)}...`);
-    }
-  } else {
-    logger.info('Status callback', { message: callback.message });
+    return;
   }
+  if (callback.type === 'complete') {
+    stopTypingForTurn(callback.message_key);
+    await handleCompleteCallback(callback, env);
+    return;
+  }
+  if (callback.type === 'error') {
+    stopTypingForTurn(callback.message_key);
+    await sendEngineError(callback, env);
+    return;
+  }
+  await renewTypingFromStatus(callback.message_key, env);
 }

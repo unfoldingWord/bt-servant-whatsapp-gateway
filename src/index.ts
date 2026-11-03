@@ -18,6 +18,7 @@ import {
   handleEngineCallback,
   validateEngineCallback,
   resolveSenderId,
+  stopTypingForTurn,
 } from './services/message-handler';
 import { processStatusEntries } from './services/meta-api/status-webhook';
 import { logger } from './utils/logger';
@@ -272,6 +273,12 @@ app.post('/progress-callback', async (c) => {
   }
 
   const callback = body as EngineCallback;
+
+  // Stop before waitUntil so a status accepted after this request cannot
+  // restart "typing…" while the reply is still being sent.
+  if (callback.type === 'complete' || callback.type === 'error') {
+    stopTypingForTurn(callback.message_key);
+  }
 
   if (callback.type === 'complete') {
     return handleCompleteWithDedup(callback, c.env, c.executionCtx);

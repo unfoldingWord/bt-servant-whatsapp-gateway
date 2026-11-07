@@ -100,6 +100,7 @@ src/
 │   │   └── signature.ts  # HMAC verification
 │   ├── engine-client.ts  # HTTP client for worker API
 │   ├── message-handler.ts # Orchestration logic
+│   ├── typing-turns.ts   # Per-turn typing indicator memory
 │   └── chunking.ts       # Message chunking
 └── utils/
     ├── crypto.ts         # Constant-time compare

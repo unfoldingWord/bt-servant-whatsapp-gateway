@@ -9,6 +9,22 @@ import {
 import app from '../../src/index';
 import { arrayBufferToHex } from '../../src/utils/crypto';
 
+const graphBodies: string[] = [];
+
+function graphBodyText(body: BodyInit | null | undefined): string {
+  if (typeof body === 'string') return body;
+  if (body instanceof Uint8Array) return new TextDecoder().decode(body);
+  return '';
+}
+
+function recordGraphReply(opts: { body?: BodyInit | null }): {
+  messaging_product: string;
+  messages: Array<{ id: string }>;
+} {
+  graphBodies.push(graphBodyText(opts.body));
+  return { messaging_product: 'whatsapp', messages: [{ id: 'wamid.mock' }] };
+}
+
 describe('webhook routes', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -201,7 +217,7 @@ describe('webhook routes', () => {
       fetchMock
         .get('https://graph.facebook.com')
         .intercept({ path: /.*/, method: 'POST' })
-        .reply(200, { messaging_product: 'whatsapp', messages: [{ id: 'wamid.mock' }] })
+        .reply(200, recordGraphReply)
         .persist();
 
       try {
@@ -262,7 +278,7 @@ describe('webhook routes', () => {
       fetchMock
         .get('https://graph.facebook.com')
         .intercept({ path: /.*/, method: 'POST' })
-        .reply(200, { messaging_product: 'whatsapp', messages: [{ id: 'wamid.mock' }] })
+        .reply(200, recordGraphReply)
         .persist();
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
@@ -303,15 +319,12 @@ describe('webhook routes', () => {
       'Content-Type': 'application/json',
       'X-Engine-Token': env.ENGINE_API_KEY,
     };
-
     beforeEach(() => {
+      graphBodies.length = 0;
       fetchMock.activate();
       fetchMock.disableNetConnect();
       const metaPool = fetchMock.get('https://graph.facebook.com');
-      metaPool
-        .intercept({ path: /.*/, method: 'POST' })
-        .reply(200, { messaging_product: 'whatsapp', messages: [{ id: 'wamid.mock' }] })
-        .persist();
+      metaPool.intercept({ path: /.*/, method: 'POST' }).reply(200, recordGraphReply).persist();
     });
 
     afterEach(() => {
@@ -405,20 +418,38 @@ describe('webhook routes', () => {
     });
 
     it('should accept valid status callback', async () => {
-      const response = await SELF.fetch('http://localhost/progress-callback', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          type: 'status',
-          user_id: 'test',
-          message_key: 'status-test-key',
-          message: 'Processing step 2',
-          timestamp: new Date().toISOString(),
+      const ctx = createExecutionContext();
+      const response = await app.fetch(
+        new Request('http://localhost/progress-callback', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            type: 'status',
+            user_id: 'test',
+            message_key: 'status-test-key',
+            message: 'Processing step 2',
+            timestamp: new Date().toISOString(),
+          }),
         }),
-      });
+        env,
+        ctx
+      );
 
       expect(response.status).toBe(200);
       expect(await response.text()).toBe('OK');
+      await waitOnExecutionContext(ctx);
+
+      const typing = graphBodies
+        .filter((raw) => raw.includes('typing_indicator'))
+        .map((raw) => JSON.parse(raw) as Record<string, unknown>);
+      expect(typing).toEqual([
+        {
+          messaging_product: 'whatsapp',
+          status: 'read',
+          message_id: 'status-test-key',
+          typing_indicator: { type: 'text' },
+        },
+      ]);
     });
 
     it('should reject malformed JSON', async () => {

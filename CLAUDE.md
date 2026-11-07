@@ -1,5 +1,54 @@
 # Claude Instructions - bt-servant-whatsapp-gateway
 
+## CRITICAL: Branching Model (develop → main)
+
+Two long-lived branches:
+
+- **`develop`** is the integration branch and the default branch. Every feature branch and every PR targets `develop`. Staging deploys automatically after CI passes on a push to `develop`. Bot review plus CI is enough to merge there.
+- **`main`** is the release branch. It only ever receives `develop` (a release PR, "Release vX.Y.Z: develop → main") or a `hotfix/*` branch. Only the repo owner can merge to `main` (branch protection restricts pushes and requires a code-owner review). Production deploys from `main` by tag.
+- **Rule: `develop` is always releasable.** Work that is not ready to ship stays on its feature branch, or merges behind a flag that is off in production. Never cherry-pick into `main`; if something on `develop` must not ship, revert it on `develop` or flag it off, then release.
+- **Hotfix:** branch from `main` as `hotfix/<name>`, PR into `main`, then open a PR from `main` into `develop` the same day so `develop` stays ahead of `main`.
+- **Release:** merge the release PR, tag `v<version>` on the resulting `main` commit, dispatch the production deploy on that tag (`gh workflow run deploy.yml --ref v<version>`).
+- **Merge methods:** feature PRs into `develop` are **squash**-merged. Release and hotfix PRs into `main` use a **merge commit**, never squash or rebase. A squash would copy `develop`'s work into a new commit that `develop` never contains, so the branches would diverge and every later release PR would re-list already-shipped commits. With merge commits, the next release PR shows only what is new, and `git log --first-parent main` lists one commit per release. Never delete `develop` when merging a release PR.
+
+CI's `Release Source` job refuses a PR into `main` from any other branch. The production deploy (`deploy.yml`) refuses to run on anything but a `v*` tag that is on `main`. `tests/unit/workflows-branching.test.ts` pins these triggers and guards.
+
+## CRITICAL: Ask Before Pushing
+
+**ALWAYS ask the user before pushing changes.** Always create a feature branch and a PR against `develop`. Never push to `develop` or `main` directly; that bypasses review.
+
+## CRITICAL: Never Deploy Directly
+
+**NEVER run `wrangler deploy` directly.** All deployments go through CI/CD:
+
+1. Commit changes on a feature branch and push it
+2. Create a PR against `develop`, wait for CI to pass, get approval and merge
+3. CI deploys `develop` to staging automatically
+4. Production: the owner merges a release PR (`develop` → `main`), tags it, and dispatches the production deploy on the tag
+
+The ONLY exception is if the user explicitly asks you to deploy directly for an emergency hotfix.
+
+## CRITICAL: Never Merge Without Permission
+
+**NEVER merge a PR without explicit user approval.**
+
+## CRITICAL: Version Bumping
+
+**Every PR MUST include a version bump** in `package.json` (the single source of truth):
+
+- **Patch** (`pnpm version patch --no-git-tag-version`): bug fixes, documentation and CI changes, minor tweaks
+- **Minor** (`pnpm version minor --no-git-tag-version`): new features, behavioral changes
+
+Use `--no-git-tag-version` on branches so no tag is created before merge. Feature PRs into `develop` are not tagged; after a release PR (`develop` → `main`) is merged, tag the release on `main`:
+
+```bash
+git checkout main && git pull
+git tag v<version>
+git push --tags
+```
+
+The release tag covers every PR since the previous release. Tags are created on `main` after a release merge, never on `develop`.
+
 ## System Context
 
 **BT Servant** is an AI-powered Bible translation assistant developed by unfoldingWord. The system helps Bible translators by providing AI-assisted drafting, checking, and guidance in multiple languages.

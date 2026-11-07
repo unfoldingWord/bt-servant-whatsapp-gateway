@@ -16,6 +16,21 @@ describe('workflow triggers follow the develop/main branching model', () => {
     expect(onBlock).toMatch(/pull_request:\s*\n\s*branches: \[main, develop\]/);
   });
 
+  it('Release Source passes the PR head branch via env, never interpolated into run:', () => {
+    // github.head_ref is chosen by the PR author; inlining it into a run:
+    // script is a script-injection vector.
+    // The release-source job runs up to the next top-level job key.
+    const jobStart = ciYml.indexOf('\n  release-source:');
+    const nextJob = ciYml.slice(jobStart + 1).search(/\n {2}[a-z][\w-]*:\n/);
+    const jobBlock = ciYml.slice(jobStart, jobStart + 1 + nextJob);
+    expect(jobBlock).toContain('HEAD_REF: ${{ github.head_ref }}');
+    expect(jobBlock).toContain('case "$HEAD_REF" in');
+    const runAt = jobBlock.indexOf('run: |');
+    expect(runAt).toBeGreaterThan(-1);
+    expect(jobBlock.slice(runAt)).not.toContain('github.head_ref');
+    expect(ciYml).not.toMatch(/=\s*"\$\{\{\s*github\.head_ref/);
+  });
+
   it('staging deploys from develop only and has no pull_request trigger', () => {
     const onBlock = stagingYml.slice(stagingYml.indexOf('\non:'), stagingYml.indexOf('\njobs:'));
     expect(onBlock).not.toContain('pull_request');

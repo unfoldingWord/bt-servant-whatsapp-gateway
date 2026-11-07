@@ -17,11 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Require develop or hotfix/* as the source of a PR into main
+        # The head branch name is chosen by the PR author, so pass it through
+        # the environment instead of interpolating it into the script.
+        env:
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
-          head="${{ github.head_ref }}"
-          echo "PR into main from '$head'"
-          case "$head" in
+          echo "PR into main from '$HEAD_REF'"
+          case "$HEAD_REF" in
             develop|hotfix/*) echo "ok" ;;
             *)
               echo "::error::PRs into main must come from develop (a release) or hotfix/* (an emergency fix). Open this PR against develop instead."

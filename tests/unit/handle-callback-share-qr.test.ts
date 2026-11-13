@@ -125,6 +125,68 @@ describe('complete callback with share_qr', () => {
   });
 });
 
+const PDF: NonNullable<EngineCallback['attachments']> = [
+  {
+    type: 'pdf',
+    url: 'https://cdn.example.com/a.pdf',
+    filename: 'a.pdf',
+    size_bytes: 10,
+    mime_type: 'application/pdf',
+  },
+];
+
+describe('share QR comes last and is strictly acknowledged', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('voice, then PDF, then the QR', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-aud-1' }) }) // audio upload
+      .mockResolvedValueOnce({ ok: true }) // audio send
+      .mockResolvedValue(metaOk());
+    await handleEngineCallback(complete({ voice_audio_base64: 'dGVzdA==', attachments: PDF, share_qr: QR }), mockEnv); // prettier-ignore
+    const sent = fetchMock.mock.calls.slice(2).map((c) => JSON.parse(c[1]?.body as string));
+    expect(sent.map((b) => b.type)).toEqual(['document', 'image']);
+  });
+
+  it('a failed PDF falls back to its URL as text before the QR starts', async () => {
+    fetchMock
+      .mockResolvedValueOnce(metaOk()) // answer text
+      .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({}) }) // document fails
+      .mockResolvedValue(metaOk()); // url fallback, then QR
+    await handleEngineCallback(complete({ text: 'ok', attachments: PDF, share_qr: QR }), mockEnv);
+    expect(bodies(fetchMock).map((b) => b.type)).toEqual(['text', 'document', 'text', 'image']);
+  });
+
+  const ambiguous: Array<[string, () => unknown]> = [
+    ['a transient error embedded in a 200', () => ({ ok: true, json: async () => ({ error: { code: 131000 } }) })], // prettier-ignore
+    ['an unparseable 200 body', () => ({ ok: true, json: async () => { throw new SyntaxError('bad json'); } })], // prettier-ignore
+    ['a 200 with no message id', () => ({ ok: true, json: async () => ({ messages: [{}] }) })],
+  ];
+  for (const [why, reply] of ambiguous) {
+    it(`retries on ${why}, then skips with an error log`, async () => {
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      fetchMock.mockImplementation(async () => reply());
+      await handleEngineCallback(complete({ share_qr: QR }), mockEnv);
+      expect(bodies(fetchMock).map((b) => b.type)).toEqual(['image', 'image']);
+      const logged = errors.mock.calls.map((c) => c.map(String).join(' ')).join('\n');
+      expect(logged).toContain('Share QR send failed after retry, skipping');
+    });
+  }
+});
+
 describe('validateEngineCallback with share_qr', () => {
   it('accepts a complete whose only content is a share QR', () => {
     expect(validateEngineCallback(complete({ share_qr: QR }))).toBeNull();

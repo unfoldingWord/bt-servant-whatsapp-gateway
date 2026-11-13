@@ -7,14 +7,16 @@
  * user can forward it later.
  *
  * Delivery (decided 2026-11-05): on failure, retry once; if that fails too,
- * skip it and log. No URL-as-text fallback: the caption already carries the
+ * skip it and log. "Failure" is strict here: any embedded Meta error, an
+ * unparseable reply, or no message id counts (`sendImageMessageStrict`).
+ * There is no URL-as-text fallback: the caption already carries the
  * link, and a bare signed image URL is no use to a user. The worker never
  * re-sends it, so a failure here is final and logged as an error.
  */
 
 import type { Env } from '../config/types';
 import type { ShareQrMedia } from '../types/engine';
-import { sendImageMessage } from './meta-api/client';
+import { sendImageMessageStrict } from './meta-api/client';
 import { MAX_CAPTION_LENGTH } from './media-extractor';
 import { logger } from '../utils/logger';
 import { redactUrl } from '../utils/url';
@@ -36,7 +38,12 @@ export function isShareQrMedia(value: unknown): value is ShareQrMedia {
 
 async function attemptSend(userId: string, qr: ShareQrMedia, env: Env): Promise<boolean> {
   try {
-    return await sendImageMessage(userId, qr.url, qr.caption.slice(0, MAX_CAPTION_LENGTH), env);
+    return await sendImageMessageStrict(
+      userId,
+      qr.url,
+      qr.caption.slice(0, MAX_CAPTION_LENGTH),
+      env
+    );
   } catch (err) {
     logger.warn('Share QR send threw', {
       code: qr.code,

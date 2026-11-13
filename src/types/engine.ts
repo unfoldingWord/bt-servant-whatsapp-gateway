@@ -15,6 +15,8 @@ export interface MessageRequest {
   progress_throttle_seconds?: number;
   audio_base64?: string;
   audio_format?: string;
+  /** This gateway sends `share_qr` from complete callbacks (worker#474). */
+  accepts_share_qr?: boolean;
 }
 
 /** Response from the /api/v1/chat endpoint */
@@ -34,6 +36,16 @@ export interface EngineAttachment {
   mime_type: 'application/pdf';
 }
 
+/** One-time share QR image on a complete callback (worker#474). */
+export interface ShareQrMedia {
+  /** Public HTTPS URL of the PNG (signed by the worker). */
+  url: string;
+  /** Caption in the user's language, ending with the wa.me link. */
+  caption: string;
+  /** Mode code the QR opens; null for the bare BT Servant link. */
+  code: string | null;
+}
+
 /** Unified payload received from engine callbacks */
 export interface EngineCallback {
   type: EngineCallbackType;
@@ -46,4 +58,6 @@ export interface EngineCallback {
   voice_audio_base64?: string;
   voice_audio_url?: string;
   attachments?: EngineAttachment[];
+  /** One-time share QR, sent as its own image after the answer (worker#474). */
+  share_qr?: ShareQrMedia;
 }

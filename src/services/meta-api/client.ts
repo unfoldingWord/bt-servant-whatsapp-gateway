@@ -97,6 +97,22 @@ export async function sendImageMessage(
 }
 
 /**
+ * Send a WhatsApp image by link, STRICT acknowledgement (worker#474 share QR).
+ * Unlike `sendImageMessage`, success requires a 2xx with a parseable body, no
+ * embedded `error` (transient or not) and a returned message id. The share QR
+ * is sent once and never re-sent by the engine, so its caller retries on any
+ * doubt rather than trusting an ambiguous reply.
+ */
+export async function sendImageMessageStrict(
+  to: string,
+  link: string,
+  caption: string | undefined,
+  env: Env
+): Promise<boolean> {
+  return sendMediaByLink(to, 'image', link, { caption, strict: true }, env);
+}
+
+/**
  * Send a WhatsApp video message by public HTTPS link.
  * Meta fetches the link directly; no upload required.
  */
@@ -128,6 +144,8 @@ type MediaKind = 'image' | 'video' | 'document';
 interface MediaOptions {
   caption?: string | undefined;
   filename?: string | undefined;
+  /** Require an unambiguous acknowledgement (see `sendImageMessageStrict`). */
+  strict?: boolean;
 }
 
 function buildMediaPayload(
@@ -187,6 +205,17 @@ function classifyMetaBody(body: MetaSendResponse | undefined, kind: MediaKind): 
   return true;
 }
 
+/** Strict acknowledgement: parseable body, no embedded error, a message id. */
+function isStrictAck(body: MetaSendResponse | undefined, kind: MediaKind): boolean {
+  const ok =
+    body !== undefined &&
+    body.error === undefined &&
+    body.messages?.[0]?.message_status !== 'failed' &&
+    (body.messages?.[0]?.id ?? '').trim().length > 0;
+  if (!ok) logger.error('Meta media send not acknowledged (strict)', { kind, body });
+  return ok;
+}
+
 async function sendMediaByLink(
   to: string,
   kind: MediaKind,
@@ -207,7 +236,12 @@ async function sendMediaByLink(
   let body: MetaSendResponse | undefined;
   try {
     body = (await response.json()) as MetaSendResponse;
-  } catch {
+  } catch (err) {
+    logger.warn('Unparseable Meta media send response body', {
+      kind,
+      status: response.status,
+      error: err instanceof Error ? err.message : String(err),
+    });
     body = undefined;
   }
 
@@ -221,7 +255,7 @@ async function sendMediaByLink(
     return false;
   }
 
-  if (!classifyMetaBody(body, kind)) return false;
+  if (options.strict ? !isStrictAck(body, kind) : !classifyMetaBody(body, kind)) return false;
 
   logger.info(`Sent ${kind} message to user`, recipientLogFields(to));
   return true;

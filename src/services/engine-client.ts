@@ -50,6 +50,8 @@ export async function sendMessage(
     org: env.ENGINE_ORG,
     message_type: audio ? 'audio' : 'text',
     message_key: messageKey,
+    // worker#474: this gateway delivers `share_qr` from complete callbacks.
+    accepts_share_qr: true,
     ...(message !== undefined ? { message } : {}),
   };
 

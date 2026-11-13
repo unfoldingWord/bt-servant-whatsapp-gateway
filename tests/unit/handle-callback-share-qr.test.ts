@@ -1,0 +1,211 @@
+/**
+ * Share QR on complete callbacks (bt-servant-worker#474): sent as its own
+ * image AFTER the answer, retried once, then skipped and logged.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { handleEngineCallback, validateEngineCallback } from '../../src/services/message-handler';
+import { isShareQrMedia } from '../../src/services/share-qr';
+import type { Env } from '../../src/config/types';
+import type { EngineCallback, ShareQrMedia } from '../../src/types/engine';
+
+const mockEnv: Env = {
+  META_VERIFY_TOKEN: 'test-verify-token',
+  META_WHATSAPP_TOKEN: 'test-whatsapp-token',
+  META_PHONE_NUMBER_ID: '123456789',
+  META_APP_SECRET: 'test-app-secret',
+  ENGINE_API_KEY: 'test-engine-key',
+  ENGINE_BASE_URL: 'http://localhost:8787',
+  ENGINE_ORG: 'test-org',
+  ENVIRONMENT: 'test',
+  CHUNK_SIZE: '1500',
+  MESSAGE_AGE_CUTOFF_SECONDS: '3600',
+  PROGRESS_THROTTLE_SECONDS: '3.0',
+  FACEBOOK_USER_AGENT: 'facebookexternalua',
+  GATEWAY_PUBLIC_URL: 'https://gateway.example.com',
+};
+
+const QR: ShareQrMedia = {
+  url: 'https://api.btservant.ai/public/share-qr/spoken.png?s=0123456789abcdef0123456789abcdef',
+  caption:
+    'Share BT Servant with others: scan this code, or forward this image.\n' +
+    'https://wa.me/15558196461?text=%23spoken',
+  code: 'spoken',
+};
+
+const metaOk = () => ({ ok: true, json: async () => ({ messages: [{ id: 'wamid.ok' }] }) });
+const metaFail = () => ({
+  ok: false,
+  status: 500,
+  json: async () => ({ error: { code: 131000 } }),
+});
+
+function complete(overrides: Partial<EngineCallback>): EngineCallback {
+  return {
+    type: 'complete',
+    user_id: '1234567890',
+    message_key: 'key-1',
+    timestamp: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function bodies(fetchMock: ReturnType<typeof vi.fn>): Array<Record<string, unknown>> {
+  return fetchMock.mock.calls.map((call) => JSON.parse(call[1]?.body as string));
+}
+
+describe('complete callback with share_qr', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('sends the answer text first, then the QR image with its caption', async () => {
+    fetchMock.mockResolvedValue(metaOk());
+    await handleEngineCallback(complete({ text: 'ok', share_qr: QR }), mockEnv);
+    const sent = bodies(fetchMock);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]?.type).toBe('text');
+    expect(sent[1]).toMatchObject({ type: 'image', image: { link: QR.url, caption: QR.caption } });
+  });
+
+  it('retries a failed image send once', async () => {
+    fetchMock
+      .mockResolvedValueOnce(metaOk())
+      .mockResolvedValueOnce(metaFail())
+      .mockResolvedValueOnce(metaOk());
+    await handleEngineCallback(complete({ text: 'ok', share_qr: QR }), mockEnv);
+    const sent = bodies(fetchMock);
+    expect(sent.map((b) => b.type)).toEqual(['text', 'image', 'image']);
+  });
+
+  it('retries after a network throw', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network down')).mockResolvedValueOnce(metaOk());
+    await handleEngineCallback(complete({ share_qr: QR }), mockEnv);
+    expect(bodies(fetchMock).map((b) => b.type)).toEqual(['image', 'image']);
+  });
+
+  it('skips after the retry fails: no URL-as-text fallback, no apology, logged as error', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(metaOk()).mockResolvedValue(metaFail());
+    await handleEngineCallback(complete({ text: 'ok', share_qr: QR }), mockEnv);
+    const sent = bodies(fetchMock);
+    expect(sent.map((b) => b.type)).toEqual(['text', 'image', 'image']);
+    const logged = errors.mock.calls.map((c) => c.map(String).join(' ')).join('\n');
+    expect(logged).toContain('Share QR send failed after retry, skipping');
+  });
+
+  it('delivers a QR-only complete (answer already streamed) without an apology on failure', async () => {
+    fetchMock.mockResolvedValue(metaFail());
+    await handleEngineCallback(complete({ share_qr: QR }), mockEnv);
+    const sent = bodies(fetchMock);
+    expect(sent.map((b) => b.type)).toEqual(['image', 'image']);
+  });
+
+  it('ignores a malformed share_qr and still delivers the answer', async () => {
+    fetchMock.mockResolvedValue(metaOk());
+    const bad = { ...QR, url: 'http://insecure.example/qr.png' };
+    await handleEngineCallback(complete({ text: 'ok', share_qr: bad }), mockEnv);
+    expect(bodies(fetchMock).map((b) => b.type)).toEqual(['text']);
+  });
+
+  it('a complete without share_qr is unchanged (text only)', async () => {
+    fetchMock.mockResolvedValue(metaOk());
+    await handleEngineCallback(complete({ text: 'ok' }), mockEnv);
+    expect(bodies(fetchMock).map((b) => b.type)).toEqual(['text']);
+  });
+});
+
+const PDF: NonNullable<EngineCallback['attachments']> = [
+  {
+    type: 'pdf',
+    url: 'https://cdn.example.com/a.pdf',
+    filename: 'a.pdf',
+    size_bytes: 10,
+    mime_type: 'application/pdf',
+  },
+];
+
+describe('share QR comes last and is strictly acknowledged', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('voice, then PDF, then the QR', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'media-aud-1' }) }) // audio upload
+      .mockResolvedValueOnce({ ok: true }) // audio send
+      .mockResolvedValue(metaOk());
+    await handleEngineCallback(complete({ voice_audio_base64: 'dGVzdA==', attachments: PDF, share_qr: QR }), mockEnv); // prettier-ignore
+    const sent = fetchMock.mock.calls.slice(2).map((c) => JSON.parse(c[1]?.body as string));
+    expect(sent.map((b) => b.type)).toEqual(['document', 'image']);
+  });
+
+  it('a failed PDF falls back to its URL as text before the QR starts', async () => {
+    fetchMock
+      .mockResolvedValueOnce(metaOk()) // answer text
+      .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({}) }) // document fails
+      .mockResolvedValue(metaOk()); // url fallback, then QR
+    await handleEngineCallback(complete({ text: 'ok', attachments: PDF, share_qr: QR }), mockEnv);
+    expect(bodies(fetchMock).map((b) => b.type)).toEqual(['text', 'document', 'text', 'image']);
+  });
+
+  const ambiguous: Array<[string, () => unknown]> = [
+    ['a transient error embedded in a 200', () => ({ ok: true, json: async () => ({ error: { code: 131000 } }) })], // prettier-ignore
+    ['an unparseable 200 body', () => ({ ok: true, json: async () => { throw new SyntaxError('bad json'); } })], // prettier-ignore
+    ['a 200 with no message id', () => ({ ok: true, json: async () => ({ messages: [{}] }) })],
+    ['a 200 with an empty message id', () => ({ ok: true, json: async () => ({ messages: [{ id: ' ' }] }) })], // prettier-ignore
+  ];
+  for (const [why, reply] of ambiguous) {
+    it(`retries on ${why}, then skips with an error log`, async () => {
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      fetchMock.mockImplementation(async () => reply());
+      await handleEngineCallback(complete({ share_qr: QR }), mockEnv);
+      expect(bodies(fetchMock).map((b) => b.type)).toEqual(['image', 'image']);
+      const logged = errors.mock.calls.map((c) => c.map(String).join(' ')).join('\n');
+      expect(logged).toContain('Share QR send failed after retry, skipping');
+    });
+  }
+});
+
+describe('validateEngineCallback with share_qr', () => {
+  it('accepts a complete whose only content is a share QR', () => {
+    expect(validateEngineCallback(complete({ share_qr: QR }))).toBeNull();
+  });
+  it('rejects a complete whose only content is a malformed share QR', () => {
+    const bad = complete({}) as unknown as Record<string, unknown>;
+    bad.share_qr = { url: 'https://x/qr.png' };
+    expect(validateEngineCallback(bad)).toMatch(/share_qr/);
+  });
+});
+
+describe('isShareQrMedia', () => {
+  it('requires an https url, a caption, and a string-or-null code', () => {
+    expect(isShareQrMedia(QR)).toBe(true);
+    expect(isShareQrMedia({ ...QR, code: null })).toBe(true);
+    expect(isShareQrMedia({ ...QR, url: 'http://x' })).toBe(false);
+    expect(isShareQrMedia({ ...QR, caption: 1 })).toBe(false);
+    expect(isShareQrMedia({ url: QR.url, caption: QR.caption })).toBe(false);
+    expect(isShareQrMedia(null)).toBe(false);
+  });
+});

@@ -58,6 +58,10 @@ Markdown-wrapped image/video links in the response text (`![alt](url)`, `[label]
 
 `complete` callbacks may include an `attachments` array. Attachments with `type: "pdf"` are sent as WhatsApp document messages (Meta fetches the public HTTPS link directly; the filename shows in the document tile). Failed document sends fall back to sending the URL as text.
 
+### Share QR
+
+The gateway sends `accepts_share_qr: true` on every chat request. When a share QR is due (once per user per mode, bt-servant-worker#474), the worker adds `share_qr: { url, caption, code }` to the `complete` callback. The gateway sends it as its own image message **after** the answer (text or voice, then PDFs), so it lands in the chat's media. A failed send is retried once, then skipped and logged. There is no URL-as-text fallback, and a `complete` carrying only a share QR never triggers the "could not deliver" apology.
+
 ### Meta Send Hardening
 
 Meta sometimes returns HTTP 200 with an embedded error body. Media sends parse the response body and classify embedded error codes as permanent, transient, or unclassified (fail-closed) so failures trigger the text-URL fallback instead of being silently dropped.
@@ -247,7 +251,7 @@ bt-servant-whatsapp-gateway/
 4. **Typing Indicator**: Marks the message read and shows a typing indicator
 5. **Engine Request**: POSTs to the worker's `/api/v1/chat/callback` with `progress_callback_url`, `message_key`, and (for voice) `audio_base64`/`audio_format`; worker replies `202 Accepted`
 6. **Callbacks**: Worker POSTs `status`/`progress`/`complete`/`error` events to `/progress-callback` (authenticated via `X-Engine-Token`); `progress` text is relayed to the user as it arrives
-7. **Complete Delivery**: On `complete`, the gateway sends voice audio if present, otherwise text (with inline images/videos rendered natively), plus any PDF attachments as document messages
+7. **Complete Delivery**: On `complete`, the gateway sends voice audio if present, otherwise text (with inline images/videos rendered natively), plus any PDF attachments as document messages, then any `share_qr` image
 8. **Chunking**: Long text responses are split at sentence boundaries into WhatsApp-friendly chunks (≤`CHUNK_SIZE`, default 1500 chars)
 
 ## Related Projects

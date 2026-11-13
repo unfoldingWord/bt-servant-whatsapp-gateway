@@ -211,7 +211,7 @@ function isStrictAck(body: MetaSendResponse | undefined, kind: MediaKind): boole
     body !== undefined &&
     body.error === undefined &&
     body.messages?.[0]?.message_status !== 'failed' &&
-    typeof body.messages?.[0]?.id === 'string';
+    (body.messages?.[0]?.id ?? '').trim().length > 0;
   if (!ok) logger.error('Meta media send not acknowledged (strict)', { kind, body });
   return ok;
 }

@@ -174,6 +174,7 @@ describe('share QR comes last and is strictly acknowledged', () => {
     ['a transient error embedded in a 200', () => ({ ok: true, json: async () => ({ error: { code: 131000 } }) })], // prettier-ignore
     ['an unparseable 200 body', () => ({ ok: true, json: async () => { throw new SyntaxError('bad json'); } })], // prettier-ignore
     ['a 200 with no message id', () => ({ ok: true, json: async () => ({ messages: [{}] }) })],
+    ['a 200 with an empty message id', () => ({ ok: true, json: async () => ({ messages: [{ id: ' ' }] }) })], // prettier-ignore
   ];
   for (const [why, reply] of ambiguous) {
     it(`retries on ${why}, then skips with an error log`, async () => {

@@ -205,15 +205,30 @@ function classifyMetaBody(body: MetaSendResponse | undefined, kind: MediaKind): 
   return true;
 }
 
-/** Strict acknowledgement: parseable body, no embedded error, a message id. */
+/**
+ * Strict acknowledgement: parseable object body, no embedded error, a
+ * non-blank string message id. Logs an allowlist only (never the raw body,
+ * which can carry the recipient's `contacts[].wa_id`), at warn: the caller
+ * retries, and logs the error only once every attempt has failed.
+ */
 function isStrictAck(body: MetaSendResponse | undefined, kind: MediaKind): boolean {
-  const ok =
-    body !== undefined &&
-    body.error === undefined &&
-    body.messages?.[0]?.message_status !== 'failed' &&
-    (body.messages?.[0]?.id ?? '').trim().length > 0;
-  if (!ok) logger.error('Meta media send not acknowledged (strict)', { kind, body });
-  return ok;
+  if (typeof body !== 'object' || body === null) {
+    logger.warn('Meta media send not acknowledged (strict)', { kind, parsed: false });
+    return false;
+  }
+  const first = body.messages?.[0];
+  const hasMessageId = isNonBlankString(first?.id);
+  if (body.error === undefined && first?.message_status !== 'failed' && hasMessageId) return true;
+  logger.warn('Meta media send not acknowledged (strict)', {
+    kind,
+    errorCode: body.error?.code,
+    hasMessageId,
+  });
+  return false;
+}
+
+function isNonBlankString(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 async function sendMediaByLink(

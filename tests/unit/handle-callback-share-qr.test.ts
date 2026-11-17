@@ -175,7 +175,18 @@ describe('share QR comes last and is strictly acknowledged', () => {
     ['an unparseable 200 body', () => ({ ok: true, json: async () => { throw new SyntaxError('bad json'); } })], // prettier-ignore
     ['a 200 with no message id', () => ({ ok: true, json: async () => ({ messages: [{}] }) })],
     ['a 200 with an empty message id', () => ({ ok: true, json: async () => ({ messages: [{ id: ' ' }] }) })], // prettier-ignore
+    ['a 200 with a null body', () => ({ ok: true, json: async () => null })],
   ];
+
+  it('never logs the raw Meta body (contacts carry the phone number)', async () => {
+    const all = (['log', 'warn', 'error'] as const).map((m) => vi.spyOn(console, m).mockImplementation(() => {})); // prettier-ignore
+    const reply = { contacts: [{ input: '15550001111', wa_id: '15550001111' }], messages: [{}] };
+    fetchMock.mockImplementation(async () => ({ ok: true, json: async () => reply }));
+    await handleEngineCallback(complete({ share_qr: QR }), mockEnv);
+    const logged = all.flatMap((s) => s.mock.calls).map((c) => c.map(String).join(' ')).join('\n'); // prettier-ignore
+    expect(logged).toContain('not acknowledged (strict)');
+    expect(logged).not.toContain('15550001111');
+  });
   for (const [why, reply] of ambiguous) {
     it(`retries on ${why}, then skips with an error log`, async () => {
       const errors = vi.spyOn(console, 'error').mockImplementation(() => {});

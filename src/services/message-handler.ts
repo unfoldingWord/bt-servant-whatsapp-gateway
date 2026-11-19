@@ -22,6 +22,7 @@ import {
   downloadMedia,
 } from './meta-api/client';
 import { extractMedia } from './media-extractor';
+import { isShareQrMedia, sendShareQr } from './share-qr';
 import type { MediaAttachment } from './media-extractor';
 import { sendMessage as sendToEngine } from './engine-client';
 import type { AudioPayload, SendMessageOptions } from './engine-client';
@@ -333,18 +334,23 @@ function hasAttachments(p: Record<string, unknown>): boolean {
   return Array.isArray(p.attachments) && p.attachments.length > 0;
 }
 
+/** A complete callback must carry something to deliver. */
+function completeHasContent(p: Record<string, unknown>): boolean {
+  return (
+    isNonEmptyString(p.text) ||
+    isNonEmptyString(p.voice_audio_base64) ||
+    isNonEmptyString(p.voice_audio_url) ||
+    hasAttachments(p) ||
+    isShareQrMedia(p.share_qr)
+  );
+}
+
 function validateCallbackFields(type: string, p: Record<string, unknown>): string | null {
   if (type === 'progress' && !isNonEmptyString(p.text)) {
     return 'Missing or invalid text for progress callback';
   }
-  if (
-    type === 'complete' &&
-    !isNonEmptyString(p.text) &&
-    !isNonEmptyString(p.voice_audio_base64) &&
-    !isNonEmptyString(p.voice_audio_url) &&
-    !hasAttachments(p)
-  ) {
-    return 'Missing text, voice_audio_base64, voice_audio_url, or attachments for complete callback';
+  if (type === 'complete' && !completeHasContent(p)) {
+    return 'Missing text, voice_audio_base64, voice_audio_url, attachments, or share_qr for complete callback';
   }
   if (type === 'error' && !isNonEmptyString(p.error)) {
     return 'Missing or invalid error for error callback';
@@ -518,6 +524,29 @@ async function sendPdfAttachments(
   return delivered;
 }
 
+/**
+ * worker#474: the one-time share QR goes out LAST, after the answer, as its
+ * own image. Best-effort: `sendShareQr` retries once, then logs and skips.
+ */
+async function deliverShareQr(callback: EngineCallback, env: Env): Promise<void> {
+  if (callback.share_qr === undefined) return;
+  if (!isShareQrMedia(callback.share_qr)) {
+    logger.warn('Ignoring malformed share_qr on complete callback');
+    return;
+  }
+  await sendShareQr(callback.user_id, callback.share_qr, env);
+}
+
+/** The complete carried answer content (anything besides a share QR). */
+function hadAnswerContent(callback: EngineCallback): boolean {
+  return Boolean(
+    callback.text ||
+    callback.voice_audio_url ||
+    callback.voice_audio_base64 ||
+    (callback.attachments ?? []).length > 0
+  );
+}
+
 async function handleCompleteCallback(callback: EngineCallback, env: Env): Promise<void> {
   const pdfs = callback.attachments ?? [];
 
@@ -533,7 +562,11 @@ async function handleCompleteCallback(callback: EngineCallback, env: Env): Promi
     pdfDelivered = await sendPdfAttachments(callback.user_id, pdfs, env);
   }
 
-  if (!audioSent && !textSent && !pdfDelivered) {
+  await deliverShareQr(callback, env);
+
+  // A complete that carried ONLY a share QR (the answer already went out as
+  // progress) has no answer to apologise for; its failure is logged above.
+  if (hadAnswerContent(callback) && !audioSent && !textSent && !pdfDelivered) {
     logger.error('Complete callback produced no deliverable content', {
       hadText: Boolean(callback.text),
       hadAudio: Boolean(callback.voice_audio_url || callback.voice_audio_base64),
